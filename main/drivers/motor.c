@@ -8,9 +8,9 @@
 #define PWM_TIMER   LEDC_TIMER_0
 
 motor_t motor_left  = { PIN_MOTOR_L_IN1, PIN_MOTOR_L_IN2, PIN_MOTOR_L_PWM,
-                        LEDC_CHANNEL_0, false };
+                        LEDC_CHANNEL_0 };
 motor_t motor_right = { PIN_MOTOR_R_IN1, PIN_MOTOR_R_IN2, PIN_MOTOR_R_PWM,
-                        LEDC_CHANNEL_1, false };
+                        LEDC_CHANNEL_1 };
 
 static int clamp_percent(int percent)
 {
@@ -83,7 +83,6 @@ void motor_init(void)
 void motor_set_speed(motor_t *m, int percent)
 {
     percent = clamp_percent(percent);
-    if (m->inverted) percent = -percent;
 
     int magnitude = percent < 0 ? -percent : percent;
     motor_set_direction(m, percent);

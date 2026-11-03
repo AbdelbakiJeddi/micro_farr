@@ -10,7 +10,6 @@ typedef struct {
     gpio_num_t     in2;
     gpio_num_t     pwm_gpio;
     ledc_channel_t pwm_ch;
-    bool           inverted;
 } motor_t;
 
 extern motor_t motor_left;
