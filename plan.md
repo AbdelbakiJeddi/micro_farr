@@ -1,76 +1,100 @@
-# Maze-Solving Robot — Plan
+# Build Plan — ESP32-S3 + FreeRTOS (Micromouse)
 
-**Target:** ESP32-S3 (ESP-IDF + FreeRTOS), project `freertos_lab`
-**Maze:** 16x16, center 2x2 goal
+Hardware and pin map: see `hardware.md`.
 
-## Hardware
+## Scope
+- Cell-to-cell maze navigation with **flood fill**.
+- **No speed run**, **no diagonal moves** at this stage.
+- Distance and cell size are measured in **encoder ticks** (no mm conversion).
+- Maze size, start pose, and goal are runtime-configurable.
 
-- ESP32-S3-Zero, TB6612FNG, 2 DC motors, 2 quadrature encoders
-- 3x VL53L0X ToF (front/left/right), SSD1306 128x64 OLED
-- Pins: user-defined in `config/pins.h`; no hard-coded pins
+## FreeRTOS Tasks
+| Task | Priority | Role |
+|------|----------|------|
+| motion_control | Highest | Wheel-tick distance PID, yaw PID, ToF centering; 100–200 Hz via `vTaskDelayUntil` |
+| sensor | High | PCNT tick deltas, MPU6050 yaw, 3x VL53L0X ranges → overwrite queue |
+| navigation | Medium | Update maze walls, run flood fill, issue next move |
+| supervisor | Medium | State machine, fault handling, task watchdog |
+| telemetry | Low | OLED + UART status |
 
-## RTOS Design
+- ESP32-S3 is dual-core: motion + sensor on core 1, navigation + telemetry on core 0.
+- Task watchdog subscribed on motion and navigation; feed only on healthy loop.
 
-### How the tasks were chosen
+## IPC
+- **Overwrite queue (len 1):** latest sensor snapshot `{l_tof, r_tof, f_tof, yaw, ticks}`.
+- **Command queue:** navigation → motion (`STRAIGHT_CELL`, `TURN_LEFT`, `TURN_RIGHT`, `STOP`).
+- **Event group:** `CALIBRATED`, `SEGMENT_DONE`, `MAZE_SOLVED`, `FAULT`.
+- **Mutex:** shared maze/wall map.
 
-1. List the jobs: motor update, sensor read, maze decision, display/log.
-2. Give each blocking resource one owner task. Never share a driver between tasks.
-3. Set priority by **deadline urgency**, not by how "important" the job feels.
-4. Make each period a multiple of the 10 ms tick.
-5. Connect tasks only with queues or notifications.
-
-### Task set
-
-| Task | Prio | Period | Owns | Why this priority |
-|------|------|--------|------|-------------------|
-| `motor_task` | 10 | 10 ms | motors, encoders | Hard deadline. A late PID/PWM update causes speed ripple and unstable control. Must preempt everything. |
-| `sensor_task` | 6 | 20 ms | ToF / I2C | Produces the data maze consumes. Runs before maze so each cycle gets a fresh frame. Short I2C reads keep it cheap. |
-| `maze_task` | 5 | 20 ms | grid, pose | Decision work is soft real-time; 20 ms late changes path quality, not stability. Consumes sensor output. |
-| `ui_task` | 1 | 200 ms | UART, OLED / I2C | Diagnostics only. OLED transfer is slow (~25 ms); must never delay control or sensing. |
-
-Priority rule: shorter deadline = higher priority. Motor (10 ms) > sensor/maze (20 ms) > UI (200 ms). Sensor sits above maze because it is the producer; maze must not run on stale data. Priority is not "importance": maze is the brain, but it can wait 20 ms while the motor cannot.
-
-### Data flow
-
+## Modules
 ```
-sensor_task --wall_queue(depth 1, overwrite)--> maze_task
-maze_task --motion_queue(depth 4)--> motor_task
-motor_task --telemetry_queue(depth 1, overwrite)--> ui_task
-stop event: task notification / event group -> motor_task
+main/
+  main.c                  # app_main: init drivers, spawn tasks
+  pins.h                  # from hardware.md
+  app_config.h            # maze, ticks, ToF, PID, calibration
+  app_types.h
+  app_ipc.{c,h}           # queue/event/mutex handles
+  drivers/
+    motor.{c,h}           # TB6612 (LEDC PWM + direction + STBY)
+    encoder.{c,h}         # PCNT quadrature, get_delta()/reset()
+    imu.{c,h}             # MPU6050 yaw (gyro + complementary filter)
+    tof.{c,h}             # VL53L0X, XSHUT re-address, range read
+    oled.{c,h}            # SSD1306 status
+  maze.{c,h}              # grid, walls, flood fill, path
+  sensor_task.{c,h}
+  motion_control_task.{c,h}
+  navigation_task.{c,h}
+  supervisor_task.{c,h}
+  telemetry_task.{c,h}
 ```
 
-### Rules and timing
+## Sensing
+- **VL53L0X x3** default address `0x29`; boot sequence holds all XSHUT low, releases one at a time, assigns: left `0x30`, front `0x31`, right `0x32` (configurable).
+- Single I2C master = sensor task at 400 kHz; publish timestamped snapshot; never block the motion loop on I2C.
+- **MPU6050:** gyro-bias calibration at rest, then integrate yaw with light complementary correction.
+- **PCNT:** hardware quadrature decode, one unit per wheel; expose signed tick delta per loop.
 
-- `vTaskDelayUntil` for every periodic task; no `vTaskDelay` for loops.
-- One owner per peripheral; only `motor_task` touches motors/encoders, only `sensor_task` touches ToF, only `ui_task` touches the OLED.
-- No heap allocation after init; no mutex around queue operations.
-- Motor WCET < 10 ms; sensor + maze < 20 ms; UI fits in its 200 ms slot.
-- Verify jitter with `esp_timer_get_time()` and stacks with `uxTaskGetStackHighWaterMark()`.
+## Motion Control (tick-based)
+- **Distance PID:** target = `CELL_TICKS`; error = target − accumulated PCNT delta.
+- **Yaw PID:** hold heading setpoint (0° straight, ±90° turns) from MPU6050.
+- **Centering:** `error = left_tof − right_tof` biases the yaw setpoint to stay mid-corridor.
+- **Primitives:** `straight_one_cell()`, `turn(±90°)`, `stop()`.
+- Segment completes when ticks reached and lateral error within threshold → raise `SEGMENT_DONE`.
+- Motor deadband + wheel-balance compensation in `app_config.h`.
 
-### Maze convention
+## Navigation (Flood Fill)
+- Grid cells store 4 wall bits (N/E/S/W) + `known` flag.
+- **Distance grid:** BFS from goal; known walls block; unknown cells assumed open during exploration.
+- **EXPLORE:** move to the lowest-distance cell that still has unknown walls, until map complete or goal found.
+- **SOLVE:** flood fill from goal on known map, extract shortest path (no diagonals), replay cell-to-cell.
+- Recompute flood after each newly detected wall.
+- Goal = configurable cell(s); start pose and heading configurable.
 
-Origin bottom-left, heading `0=N,1=E,2=S,3=W`, wall bits `N=1,E=2,S=4,W=8`, goal cells `(7,7),(7,8),(8,7),(8,8)`.
+## Configuration (`app_config.h`)
+- `MAZE_W`, `MAZE_H`, `START_X`, `START_Y`, `START_HEADING`, goal cell(s).
+- `CELL_TICKS` (ticks per cell), turn target ticks.
+- ToF addresses + per-sensor offsets/thresholds.
+- PID gains (distance, yaw, centering), motor deadband, speed limits, loop rate.
 
-## Phases
+## State Machine (supervisor)
+```
+BOOT -> CALIBRATE -> EXPLORE -> SOLVE -> STOP
+                        \_______ FAULT ____/
+```
 
-0. **Environment + project** — export ESP-IDF, `idf.py --version`, target `esp32s3`, tick 100 Hz, `idf.py build/flash`.
-1. **FreeRTOS fundamentals** — two periodic tasks, priorities, `vTaskDelayUntil`, execution time. Output: task framework.
-2. **Motor control** — PWM, direction, encoders, PID. Output: straight driving + controlled turns.
-3. **Wall detection** — read/filter ToF, publish via queue. Output: stable wall frame.
-4. **Coordination** — sensor/maze/motor/ui tasks with queues and priorities. Output: responsive architecture.
-5. **Maze solver** — grid, pose, flood fill, explore and solve. Output: integrated solver.
-6. **Integration** — combine, test faults, tune, real maze. Output: final buildable project.
+## Faults / Safety
+- Wall-loss on a side during centering.
+- Front crash / wall step detection.
+- Stall: ticks not advancing vs PWM command.
+- Segment timeout, I2C NACK, low battery.
 
-## Progress
-
-- [ ] Phase 0 — Environment + project
-- [ ] Phase 1 — FreeRTOS fundamentals
-- [ ] Phase 2 — Motor control
-- [ ] Phase 3 — Wall detection
-- [ ] Phase 4 — Coordination
-- [ ] Phase 5 — Maze solver
-- [ ] Phase 6 — Integration
-
-## Open Values
-
-Motor constants (wheel diameter, CPR, gear ratio), start cell/heading, final tuning. Pins are learner-owned.
+## Milestones
+1. Build/flash + I2C scan shows all devices + OLED alive.
+2. VL53L0X re-addressed via XSHUT; L/R/F ranges sane.
+3. Motors both directions; PCNT tick sign correct per wheel.
+4. Yaw stable at rest.
+5. Straight one cell using tick PID.
+6. Add yaw-hold + side-ToF centering.
+7. Accurate ±90° turns.
+8. Cell-to-cell traversal with wall recording.
+9. Flood fill explore + solve + path replay.
