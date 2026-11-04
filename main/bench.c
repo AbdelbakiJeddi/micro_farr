@@ -7,10 +7,12 @@
 #include "freertos/task.h"
 
 #include "app_ipc.h"
+#include "button.h"
 #include "encoder.h"
 #include "imu.h"
 #include "motion_control_task.h"
 #include "motor.h"
+#include "navigation_task.h"
 #include "oled.h"
 #include "pins.h"
 #include "tof.h"
@@ -189,49 +191,6 @@ static void bench_cell_cal_test(void)
 #endif
 
 #if BENCH_STRAIGHT_TEST
-static void button_init(void)
-{
-    gpio_config_t cfg = {
-        .pin_bit_mask = (1ULL << PIN_BUTTON) | (1ULL << PIN_BUTTON_EXT),
-        .mode         = GPIO_MODE_INPUT,
-        .pull_up_en   = GPIO_PULLUP_ENABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type    = GPIO_INTR_DISABLE,
-    };
-    gpio_config(&cfg);
-}
-
-/* True while either the BOOT button or the external button is pressed. */
-static bool button_pressed(void)
-{
-    return gpio_get_level(PIN_BUTTON) == BUTTON_ACTIVE_LEVEL ||
-           gpio_get_level(PIN_BUTTON_EXT) == BUTTON_ACTIVE_LEVEL;
-}
-
-static void button_wait_press(void)
-{
-    /* If button was held down during power-on/reset, wait for release */
-    while (button_pressed()) {
-        vTaskDelay(pdMS_TO_TICKS(50));
-    }
-
-    /* Wait for press */
-    while (!button_pressed()) {
-        vTaskDelay(pdMS_TO_TICKS(50));
-    }
-
-    /* Debounce */
-    vTaskDelay(pdMS_TO_TICKS(50));
-
-    /* Wait for release */
-    while (button_pressed()) {
-        vTaskDelay(pdMS_TO_TICKS(50));
-    }
-
-    /* Short safety settle delay before launch so hand is clear */
-    vTaskDelay(pdMS_TO_TICKS(BENCH_STRAIGHT_DELAY_MS));
-}
-
 static void bench_straight_test(void)
 {
     esp_log_level_set(TAG, ESP_LOG_INFO);
@@ -241,7 +200,7 @@ static void bench_straight_test(void)
         ESP_LOGI(TAG, "spawned in IDLE. Press BOOT button to launch (%d cells)...",
                  BENCH_STRAIGHT_CELLS);
 
-        button_wait_press();
+        button_wait_press(BENCH_STRAIGHT_DELAY_MS);
 
         ESP_LOGI(TAG, "button pressed! Starting straight run (%d cells, %ld ticks)",
                  BENCH_STRAIGHT_CELLS,
@@ -312,6 +271,10 @@ bool bench_run_if_enabled(bench_init_fn_t init_fn)
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
+    return true;
+#elif BENCH_MAZE_TEST
+    if (init_fn) init_fn();
+    navigation_task_start();
     return true;
 #elif BENCH_STRAIGHT_TEST
     if (init_fn) init_fn();

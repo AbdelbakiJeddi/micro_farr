@@ -19,7 +19,9 @@
 #define BENCH_CELL_CAL_TEST      0
 #define BENCH_CELL_CAL_PERIOD_MS 200
 
-#define BENCH_STRAIGHT_TEST      1
+#define BENCH_MAZE_TEST          1   /* full maze solve; press a button to start */
+
+#define BENCH_STRAIGHT_TEST      0
 #define BENCH_STRAIGHT_CELLS     2
 #define BENCH_STRAIGHT_REPEATS   1
 #define BENCH_STRAIGHT_DELAY_MS  500
@@ -103,3 +105,34 @@
 #define TOF_OFFSET_ALPHA        0.1f    /* low-pass per 5 ms loop (~50 ms time constant) */
 
 #define SEGMENT_TIMEOUT_MS      5000
+
+/* Front wall: emergency stop of a straight move when the front ToF reads below this */
+#define FRONT_STOP_MM           50
+
+/* Pivot turns (positive yaw = left / counter-clockwise) */
+#define TURN_QUARTER_DEG        90.0f
+#define TURN_KP                 0.5f    /* duty per degree of heading error */
+#define TURN_TOL_DEG            2.0f
+#define TURN_SETTLE_LOOPS       10      /* motion loops inside tolerance before "done" */
+#define TURN_TIMEOUT_MS         3000
+/* Heading reference carried between moves; re-captured after this idle time */
+#define HEADING_REF_TIMEOUT_MS  2000
+
+/* Maze (x grows east, y grows north; directions 0=N 1=E 2=S 3=W) */
+#define MAZE_W                  3
+#define MAZE_H                  3
+#define MAZE_START_X            0
+#define MAZE_START_Y            0
+#define MAZE_START_DIR          0
+#define MAZE_GOAL_X             1
+#define MAZE_GOAL_Y             1
+
+/* Navigation */
+#define NAV_FRONT_WALL_MM       TOF_WALL_MAX_MM  /* square robot: same wall threshold as the sides */
+#define NAV_SENSE_SETTLE_MS     100     /* wait after stopping before reading walls */
+#define NAV_START_DELAY_MS      500
+#define NAV_MOVE_WAIT_MS        (SEGMENT_TIMEOUT_MS + 2000)
+#define NAV_MAX_STEPS           60
+#define NAV_TASK_CORE           0
+#define NAV_TASK_PRIO           5
+#define NAV_TASK_STACK          4096
