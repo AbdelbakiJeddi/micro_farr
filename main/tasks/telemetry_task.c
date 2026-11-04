@@ -25,6 +25,15 @@ static const char *state_text(motion_state_t state)
     }
 }
 
+static void format_tof(char *buf, size_t size, const char *label, int32_t mm)
+{
+    if (mm >= 0) {
+        snprintf(buf, size, "%s %ld", label, (long)mm);
+    } else {
+        snprintf(buf, size, "%s ---", label);
+    }
+}
+
 static void render_frame(bool have_status, const motion_status_t *status,
                          bool have_snapshot, const sensor_snapshot_t *snapshot)
 {
@@ -55,6 +64,16 @@ static void render_frame(bool have_status, const motion_status_t *status,
         oled_text_line(3, line);
     } else {
         oled_text_line(3, "L--- R---");
+    }
+
+    if (have_snapshot) {
+        format_tof(line, sizeof(line), "LT", snapshot->left_tof);
+        oled_text_line(4, line);
+        format_tof(line, sizeof(line), "RT", snapshot->right_tof);
+        oled_text_line(5, line);
+    } else {
+        oled_text_line(4, "LT ---");
+        oled_text_line(5, "RT ---");
     }
 
     oled_flush();

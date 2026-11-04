@@ -20,7 +20,7 @@
 #define BENCH_CELL_CAL_PERIOD_MS 200
 
 #define BENCH_STRAIGHT_TEST      1
-#define BENCH_STRAIGHT_CELLS     5
+#define BENCH_STRAIGHT_CELLS     2
 #define BENCH_STRAIGHT_REPEATS   1
 #define BENCH_STRAIGHT_DELAY_MS  500
 
@@ -46,7 +46,7 @@
 
 #define IMU_ADDR_PRIMARY        0x68
 #define IMU_ADDR_ALT            0x69
-#define IMU_CALIB_SAMPLES       500
+#define IMU_CALIB_SAMPLES       1000
 #define IMU_CALIB_DELAY_MS      2
 #define GYRO_LSB_PER_DPS        65.5f
 
@@ -72,7 +72,7 @@
 #define SENSOR_TASK_STACK       4096
 #define MOTION_TASK_STACK       4096
 
-#define CELL_TICKS              1495
+#define CELL_TICKS              1400
 #define ENCODER_LEFT_SIGN       1
 #define ENCODER_RIGHT_SIGN      1
 
@@ -80,17 +80,17 @@
 #define DIST_KP                 0.06f
 #define MOTION_MIN_DUTY         15.0f
 #define MOTION_MAX_DUTY         30.0f
-#define MOTION_ACCEL_SLEW       0.5f
+#define MOTION_ACCEL_SLEW       0.6f
 
 #define YAW_KP                  0.5f
-#define YAW_MAX_CORR            8.0f
+#define YAW_MAX_CORR            12.0f
 #define YAW_STEER_SIGN          1
 
 /* Straight-line steering source: 1 = side ToF centering only, 0 = IMU yaw hold */
 #define STEER_USE_TOF           1
-#define TOF_WALL_MAX_MM         130     /* side reading below this counts as a wall */
-#define TOF_SIDE_TARGET_MM      70      /* (250 mm cell - 100 mm robot) / 2 */
-#define TOF_CENTER_KP           0.15f   /* duty per mm of lateral error */
-#define TOF_CENTER_MAX_CORR     8.0f
+#define TOF_WALL_MAX_MM         170    /* side reading below this counts as a wall */
+#define TOF_SIDE_TARGET_MM      85      /* (250 mm cell - 100 mm robot) / 2 */
+#define TOF_CENTER_KP           0.2f   /* duty per mm of lateral error */
+#define TOF_CENTER_MAX_CORR     14.0f
 
 #define SEGMENT_TIMEOUT_MS      5000
