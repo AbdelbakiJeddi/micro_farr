@@ -21,6 +21,13 @@
 
 #define BENCH_MAZE_TEST          1   /* full maze solve; press a button to start */
 
+#define BENCH_SPEED_CAL_TEST     0   /* prints wheel speed vs duty to calibrate RUN_KFF */
+#define BENCH_SPEED_CAL_START    10
+#define BENCH_SPEED_CAL_MAX      40
+#define BENCH_SPEED_CAL_STEP     5
+#define BENCH_SPEED_CAL_SETTLE_MS  500
+#define BENCH_SPEED_CAL_MEASURE_MS 500
+
 #define BENCH_STRAIGHT_TEST      0
 #define BENCH_STRAIGHT_CELLS     2
 #define BENCH_STRAIGHT_REPEATS   1
@@ -78,11 +85,31 @@
 #define ENCODER_LEFT_SIGN       1
 #define ENCODER_RIGHT_SIGN      1
 
-#define STRAIGHT_FF_DUTY        0.0f
-#define DIST_KP                 0.06f
 #define MOTION_MIN_DUTY         15.0f
 #define MOTION_MAX_DUTY         24.0f
-#define MOTION_ACCEL_SLEW       0.6f
+
+/* Continuous straight running: closed-loop speed with a trapezoid profile.
+ * Speeds are given in mm/s and converted to encoder ticks with CELL_TICKS per CELL_MM. */
+#define CELL_MM                 250.0f
+#define TICKS_PER_MM            ((float)CELL_TICKS / CELL_MM)
+#define RUN_CRUISE_MM_S         300.0f
+#define RUN_ACCEL_MM_S2         1500.0f
+#define RUN_DECEL_MM_S2         2000.0f
+#define RUN_MIN_MM_S            40.0f    /* creep speed so a run always finishes */
+#define RUN_CRUISE_TICKS_S      (RUN_CRUISE_MM_S * TICKS_PER_MM)
+#define RUN_ACCEL_TICKS_S2      (RUN_ACCEL_MM_S2 * TICKS_PER_MM)
+#define RUN_DECEL_TICKS_S2      (RUN_DECEL_MM_S2 * TICKS_PER_MM)
+#define RUN_MIN_TICKS_S         (RUN_MIN_MM_S * TICKS_PER_MM)
+
+#define RUN_MAX_DUTY            40.0f    /* straight-run duty cap (turns use MOTION_MAX_DUTY) */
+#define RUN_START_DUTY          8.0f     /* integral pre-load to break static friction */
+#define RUN_KFF                 0.012f   /* duty % per tick/s of reference (calibrate!) */
+#define RUN_KP                  0.010f   /* duty % per tick/s of speed error */
+#define RUN_KI                  0.050f   /* duty % per tick of accumulated speed error */
+#define RUN_I_MAX_DUTY          10.0f
+
+#define SPEED_WINDOW_MS         20       /* min time between speed samples */
+#define SPEED_FILTER_ALPHA      0.5f
 
 #define YAW_KP                  0.5f
 #define YAW_MAX_CORR            12.0f
@@ -131,6 +158,12 @@
 #define NAV_FRONT_WALL_MM       TOF_WALL_MAX_MM  /* square robot: same wall threshold as the sides */
 #define NAV_SENSE_SETTLE_MS     100     /* wait after stopping before reading walls */
 #define NAV_START_DELAY_MS      500
+/* While running: decide for the next cell once this fraction of the way to its centre has
+ * been covered (0.8 = 50 mm before the centre of a 250 mm cell). The front wall is then
+ * ~0.7 cell ahead, so the "wall" limit sits halfway between 175 mm and 425 mm. */
+#define NAV_DECIDE_FRAC         0.8f
+#define NAV_RUN_FRONT_WALL_MM   300
+#define NAV_POLL_MS             10
 #define NAV_MOVE_WAIT_MS        (SEGMENT_TIMEOUT_MS + 2000)
 #define NAV_MAX_STEPS           60
 #define NAV_TASK_CORE           0

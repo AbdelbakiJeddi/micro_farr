@@ -17,7 +17,7 @@
 #include "pins.h"
 #include "tof.h"
 
-#if BENCH_MOTOR_TEST || BENCH_ENCODER_TEST || BENCH_IMU_TEST || BENCH_TOF_TEST || BENCH_CELL_CAL_TEST || BENCH_STRAIGHT_TEST
+#if BENCH_MOTOR_TEST || BENCH_ENCODER_TEST || BENCH_IMU_TEST || BENCH_TOF_TEST || BENCH_CELL_CAL_TEST || BENCH_STRAIGHT_TEST || BENCH_SPEED_CAL_TEST
 static const char *TAG = "bench";
 #endif
 
@@ -190,6 +190,43 @@ static void bench_cell_cal_test(void)
 }
 #endif
 
+#if BENCH_SPEED_CAL_TEST
+static int32_t wheel_ticks_avg(void)
+{
+    return (encoder_get_total(&encoder_left) * ENCODER_LEFT_SIGN +
+            encoder_get_total(&encoder_right) * ENCODER_RIGHT_SIGN) / 2;
+}
+
+/* Steps both wheels through a range of duties and prints the measured speed. Use the
+ * ticks/s at the duty that matches RUN_CRUISE_MM_S to set RUN_KFF = duty / (ticks/s). */
+static void bench_speed_cal_test(void)
+{
+    motor_init();
+    encoder_init();
+    motor_enable(true);
+
+    while (1) {
+        for (int duty = BENCH_SPEED_CAL_START; duty <= BENCH_SPEED_CAL_MAX;
+             duty += BENCH_SPEED_CAL_STEP) {
+            motor_set_speed(&motor_left, duty);
+            motor_set_speed(&motor_right, duty);
+            vTaskDelay(pdMS_TO_TICKS(BENCH_SPEED_CAL_SETTLE_MS));
+
+            int32_t start = wheel_ticks_avg();
+            vTaskDelay(pdMS_TO_TICKS(BENCH_SPEED_CAL_MEASURE_MS));
+            int32_t ticks_s = (wheel_ticks_avg() - start) * 1000 / BENCH_SPEED_CAL_MEASURE_MS;
+
+            ESP_LOGI(TAG, "duty=%d%% -> %ld ticks/s (%ld mm/s)", duty, (long)ticks_s,
+                     (long)((float)ticks_s / TICKS_PER_MM));
+        }
+        motor_set_speed(&motor_left, 0);
+        motor_set_speed(&motor_right, 0);
+        ESP_LOGI(TAG, "--- cycle done, repeating in 3 s ---");
+        vTaskDelay(pdMS_TO_TICKS(3000));
+    }
+}
+#endif
+
 #if BENCH_STRAIGHT_TEST
 static void bench_straight_test(void)
 {
@@ -271,6 +308,11 @@ bool bench_run_if_enabled(bench_init_fn_t init_fn)
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
+    return true;
+#elif BENCH_SPEED_CAL_TEST
+    (void)init_fn;
+    ESP_LOGI(TAG, "micro_farr boot - speed calibration bench");
+    bench_speed_cal_test();
     return true;
 #elif BENCH_MAZE_TEST
     if (init_fn) init_fn();

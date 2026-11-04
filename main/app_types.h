@@ -13,6 +13,7 @@ typedef enum {
 
 typedef enum {
     CMD_STRAIGHT_CELL,
+    CMD_EXTEND_CELL,   /* add one more cell to the straight run in progress */
     CMD_TURN_LEFT,
     CMD_TURN_RIGHT,
     CMD_STOP,

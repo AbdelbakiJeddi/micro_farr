@@ -21,9 +21,17 @@ typedef struct {
     int32_t    target_ticks;
     float      yaw_ref;
     float      yaw_offset;   /* ToF-driven correction added to yaw_ref (deg) */
-    float      current_duty;
+    float      v_ref;        /* speed reference (ticks/s) */
+    float      i_term;       /* speed-loop integral term (duty %) */
+    int32_t    progress;     /* ticks travelled in this run */
     TickType_t start_tick;
 } straight_state_t;
+
+typedef struct {
+    int32_t  ref_ticks;      /* average wheel ticks at the last speed sample */
+    uint32_t ref_ms;
+    float    v;              /* filtered speed (ticks/s) */
+} speed_est_t;
 
 typedef struct {
     bool       active;
@@ -31,7 +39,10 @@ typedef struct {
     TickType_t start_tick;
 } turn_state_t;
 
+#define MOTION_DT_S (1.0f / (float)MOTION_TASK_HZ)
+
 static straight_state_t s_straight;
+static speed_est_t      s_speed;
 static turn_state_t     s_turn;
 static bool             s_pending_straight;
 static bool             s_pending_turn;
@@ -138,9 +149,38 @@ static void publish_result(bool success, const char *fail_note)
     app_ipc_set_event(success ? APP_EVENT_SEGMENT_DONE : APP_EVENT_FAULT);
 }
 
+static int32_t avg_ticks(const sensor_snapshot_t *snapshot)
+{
+    return (snapshot->left_ticks + snapshot->right_ticks) / 2;
+}
+
+static void speed_reset(const sensor_snapshot_t *snapshot)
+{
+    s_speed.ref_ticks = avg_ticks(snapshot);
+    s_speed.ref_ms    = snapshot->timestamp_ms;
+    s_speed.v         = 0.0f;
+}
+
+/* Wheel speed in ticks/s, measured over windows of at least SPEED_WINDOW_MS and filtered. */
+static float speed_update(const sensor_snapshot_t *snapshot)
+{
+    uint32_t dt_ms = snapshot->timestamp_ms - s_speed.ref_ms;
+
+    if (dt_ms >= SPEED_WINDOW_MS) {
+        int32_t ticks = avg_ticks(snapshot);
+        float   inst  = (float)(ticks - s_speed.ref_ticks) * 1000.0f / (float)dt_ms;
+
+        s_speed.v += SPEED_FILTER_ALPHA * (inst - s_speed.v);
+        s_speed.ref_ticks = ticks;
+        s_speed.ref_ms    = snapshot->timestamp_ms;
+    }
+    return s_speed.v;
+}
+
 static void begin_straight(const sensor_snapshot_t *snapshot)
 {
     sync_heading_ref(snapshot);
+    speed_reset(snapshot);
 
     s_straight.active       = true;
     s_straight.start_left   = snapshot->left_ticks;
@@ -148,7 +188,9 @@ static void begin_straight(const sensor_snapshot_t *snapshot)
     s_straight.target_ticks = s_target_ticks > 0 ? s_target_ticks : CELL_TICKS;
     s_straight.yaw_ref      = s_heading_ref;
     s_straight.yaw_offset   = 0.0f;
-    s_straight.current_duty = MOTION_MIN_DUTY;
+    s_straight.v_ref        = RUN_MIN_TICKS_S;
+    s_straight.i_term       = RUN_START_DUTY;
+    s_straight.progress     = 0;
     s_straight.start_tick   = xTaskGetTickCount();
 
     s_status.state          = MOTION_RUNNING;
@@ -167,9 +209,7 @@ static void finish_straight(bool success)
     }
 
     s_straight.active = false;
-    if (success) {
-        s_status.progress_ticks = s_straight.target_ticks;
-    }
+    s_status.progress_ticks = s_straight.progress; /* actual distance, not the target */
     publish_result(success, "TIMEOUT");
 }
 
@@ -226,6 +266,19 @@ static void queue_straight(void)
     s_pending_straight = true;
 }
 
+/* Add one cell to the run in progress so the robot keeps going without braking. */
+static void extend_straight(void)
+{
+    if (s_straight.active) {
+        s_straight.target_ticks += CELL_TICKS;
+        s_status.target_ticks    = s_straight.target_ticks;
+    } else if (s_pending_straight) {
+        s_target_ticks += CELL_TICKS;
+    } else {
+        ESP_LOGW(TAG, "extend ignored: no straight run");
+    }
+}
+
 static void queue_turn(float delta_deg)
 {
     if (motion_busy()) {
@@ -241,6 +294,10 @@ static void handle_command(motion_cmd_t cmd)
     switch (cmd) {
     case CMD_STRAIGHT_CELL:
         queue_straight();
+        break;
+
+    case CMD_EXTEND_CELL:
+        extend_straight();
         break;
 
     case CMD_TURN_LEFT:
@@ -316,6 +373,45 @@ static float compute_steer(const sensor_snapshot_t *snapshot)
     return yaw_hold_steer(snapshot, tof_heading_offset(snapshot));
 }
 
+/* Trapezoid profile: accelerate to cruise, brake so the speed reaches the creep speed
+ * exactly at the target. Extending the target moves the braking point further away. */
+static float next_speed_ref(int32_t remaining_ticks)
+{
+    float v_brake = sqrtf(2.0f * RUN_DECEL_TICKS_S2 * (float)remaining_ticks) + RUN_MIN_TICKS_S;
+    float v_up    = s_straight.v_ref + RUN_ACCEL_TICKS_S2 * MOTION_DT_S;
+    float v       = fminf(fminf(v_up, RUN_CRUISE_TICKS_S), v_brake);
+
+    s_straight.v_ref = v;
+    return v;
+}
+
+/* Feed-forward + PI on wheel speed; returns duty in percent. */
+static float speed_duty(float v_ref, float v_meas)
+{
+    float err = v_ref - v_meas;
+
+    s_straight.i_term += RUN_KI * err * MOTION_DT_S;
+    if (s_straight.i_term > RUN_I_MAX_DUTY) {
+        s_straight.i_term = RUN_I_MAX_DUTY;
+    }
+    if (s_straight.i_term < -RUN_I_MAX_DUTY) {
+        s_straight.i_term = -RUN_I_MAX_DUTY;
+    }
+    return RUN_KFF * v_ref + RUN_KP * err + s_straight.i_term;
+}
+
+/* Straight running never reverses a wheel. */
+static int clamp_run_duty(float duty)
+{
+    if (duty < 0.0f) {
+        duty = 0.0f;
+    }
+    if (duty > RUN_MAX_DUTY) {
+        duty = RUN_MAX_DUTY;
+    }
+    return (int)(duty + 0.5f);
+}
+
 static void update_straight(const sensor_snapshot_t *snapshot)
 {
     uint32_t timeout_ms = SEGMENT_TIMEOUT_MS * (uint32_t)((s_straight.target_ticks + CELL_TICKS - 1) / CELL_TICKS);
@@ -334,6 +430,7 @@ static void update_straight(const sensor_snapshot_t *snapshot)
 
     int32_t progress = ((snapshot->left_ticks - s_straight.start_left) +
                         (snapshot->right_ticks - s_straight.start_right)) / 2;
+    s_straight.progress = progress;
 
     if (progress >= s_straight.target_ticks) {
         ESP_LOGI(TAG, "segment done: progress=%ld", (long)progress);
@@ -346,28 +443,13 @@ static void update_straight(const sensor_snapshot_t *snapshot)
     s_status.target_ticks   = s_straight.target_ticks;
     publish_status();
 
-    float dist_err = (float)s_straight.target_ticks - (float)progress;
-    float target_cmd = STRAIGHT_FF_DUTY + DIST_KP * dist_err;
-    if (target_cmd > MOTION_MAX_DUTY) {
-        target_cmd = MOTION_MAX_DUTY;
-    }
+    float v_meas = speed_update(snapshot);
+    float v_ref  = next_speed_ref(s_straight.target_ticks - progress);
+    float cmd    = speed_duty(v_ref, v_meas);
+    float steer  = compute_steer(snapshot);
 
-    /* Smooth acceleration ramp-up to prevent sudden wheel-spin and current spikes */
-    if (s_straight.current_duty < target_cmd) {
-        s_straight.current_duty += MOTION_ACCEL_SLEW;
-        if (s_straight.current_duty > target_cmd) {
-            s_straight.current_duty = target_cmd;
-        }
-    } else {
-        s_straight.current_duty = target_cmd;
-    }
-
-    float cmd = s_straight.current_duty;
-
-    float steer = compute_steer(snapshot);
-
-    int left_cmd = clamp_duty(cmd - (float)YAW_STEER_SIGN * steer);
-    int right_cmd = clamp_duty(cmd + (float)YAW_STEER_SIGN * steer);
+    int left_cmd  = clamp_run_duty(cmd - (float)YAW_STEER_SIGN * steer);
+    int right_cmd = clamp_run_duty(cmd + (float)YAW_STEER_SIGN * steer);
 
     motor_set_speed(&motor_left, left_cmd);
     motor_set_speed(&motor_right, right_cmd);
@@ -471,6 +553,12 @@ esp_err_t straight_cells(uint8_t cells)
     }
     s_target_ticks = (int32_t)cells * CELL_TICKS;
     return send_motion_cmd(CMD_STRAIGHT_CELL);
+}
+
+esp_err_t straight_extend_cell(void)
+{
+    /* No event clearing here: the run in progress must keep its own completion event. */
+    return app_ipc_send_motion(CMD_EXTEND_CELL, pdMS_TO_TICKS(100)) ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
 esp_err_t turn_left(void)
