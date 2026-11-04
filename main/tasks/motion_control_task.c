@@ -44,6 +44,7 @@ static void set_status_note(const char *note)
     snprintf(s_status.note, sizeof(s_status.note), "%s", note);
 }
 
+#if !STEER_USE_TOF
 static float wrap180(float deg)
 {
     while (deg > 180.0f) {
@@ -54,6 +55,7 @@ static float wrap180(float deg)
     }
     return deg;
 }
+#endif
 
 static float clamp_float(float value, float limit)
 {
@@ -165,6 +167,42 @@ static void handle_command(motion_cmd_t cmd)
     }
 }
 
+#if STEER_USE_TOF
+static bool side_is_wall(int32_t tof_mm)
+{
+    return tof_mm >= 0 && tof_mm < TOF_WALL_MAX_MM;
+}
+
+/* Lateral error in mm: positive = too close to the right wall (steer left). */
+static float tof_lateral_error(const sensor_snapshot_t *snapshot)
+{
+    bool left  = side_is_wall(snapshot->left_tof);
+    bool right = side_is_wall(snapshot->right_tof);
+
+    if (left && right) {
+        return 0.5f * (float)(snapshot->left_tof - snapshot->right_tof);
+    }
+    if (left) {
+        return (float)(snapshot->left_tof - TOF_SIDE_TARGET_MM);
+    }
+    if (right) {
+        return (float)(TOF_SIDE_TARGET_MM - snapshot->right_tof);
+    }
+    return 0.0f; /* no side walls: drive straight */
+}
+
+static float compute_steer(const sensor_snapshot_t *snapshot)
+{
+    return clamp_float(TOF_CENTER_KP * tof_lateral_error(snapshot), TOF_CENTER_MAX_CORR);
+}
+#else
+static float compute_steer(const sensor_snapshot_t *snapshot)
+{
+    float yaw_err = wrap180(s_straight.yaw_ref - snapshot->yaw);
+    return clamp_float(YAW_KP * yaw_err, YAW_MAX_CORR);
+}
+#endif
+
 static void update_straight(const sensor_snapshot_t *snapshot)
 {
     uint32_t timeout_ms = SEGMENT_TIMEOUT_MS * (uint32_t)((s_straight.target_ticks + CELL_TICKS - 1) / CELL_TICKS);
@@ -207,10 +245,9 @@ static void update_straight(const sensor_snapshot_t *snapshot)
 
     float cmd = s_straight.current_duty;
 
-    float yaw_err = wrap180(s_straight.yaw_ref - snapshot->yaw);
-    float steer = clamp_float(YAW_KP * yaw_err, YAW_MAX_CORR);
+    float steer = compute_steer(snapshot);
 
-    int left_cmd  = clamp_duty(cmd - (float)YAW_STEER_SIGN * steer);
+    int left_cmd = clamp_duty(cmd - (float)YAW_STEER_SIGN * steer);
     int right_cmd = clamp_duty(cmd + (float)YAW_STEER_SIGN * steer);
 
     motor_set_speed(&motor_left, left_cmd);

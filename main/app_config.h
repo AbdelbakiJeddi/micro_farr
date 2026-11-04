@@ -86,4 +86,11 @@
 #define YAW_MAX_CORR            8.0f
 #define YAW_STEER_SIGN          1
 
+/* Straight-line steering source: 1 = side ToF centering only, 0 = IMU yaw hold */
+#define STEER_USE_TOF           1
+#define TOF_WALL_MAX_MM         130     /* side reading below this counts as a wall */
+#define TOF_SIDE_TARGET_MM      70      /* (250 mm cell - 100 mm robot) / 2 */
+#define TOF_CENTER_KP           0.15f   /* duty per mm of lateral error */
+#define TOF_CENTER_MAX_CORR     8.0f
+
 #define SEGMENT_TIMEOUT_MS      5000
