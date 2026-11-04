@@ -79,7 +79,7 @@
 #define STRAIGHT_FF_DUTY        0.0f
 #define DIST_KP                 0.06f
 #define MOTION_MIN_DUTY         15.0f
-#define MOTION_MAX_DUTY         30.0f
+#define MOTION_MAX_DUTY         24.0f
 #define MOTION_ACCEL_SLEW       0.6f
 
 #define YAW_KP                  0.5f
@@ -90,7 +90,7 @@
 #define STEER_USE_TOF           1
 #define TOF_WALL_MAX_MM         170    /* side reading below this counts as a wall */
 #define TOF_SIDE_TARGET_MM      85      /* (250 mm cell - 100 mm robot) / 2 */
-#define TOF_CENTER_KP           0.2f   /* duty per mm of lateral error */
+#define TOF_CENTER_KP           0.10f   /* duty per mm of lateral error */
 #define TOF_CENTER_MAX_CORR     14.0f
 
 #define SEGMENT_TIMEOUT_MS      5000
