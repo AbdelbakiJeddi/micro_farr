@@ -97,9 +97,9 @@
  * Speeds are given in mm/s and converted to encoder ticks with CELL_TICKS per CELL_MM. */
 #define CELL_MM                 250.0f
 #define TICKS_PER_MM            ((float)CELL_TICKS / CELL_MM)
-#define RUN_CRUISE_MM_S         300.0f
-#define RUN_ACCEL_MM_S2         1500.0f
-#define RUN_DECEL_MM_S2         2000.0f
+#define RUN_CRUISE_MM_S         450.0f
+#define RUN_ACCEL_MM_S2         2500.0f
+#define RUN_DECEL_MM_S2         3000.0f
 #define RUN_MIN_MM_S            40.0f    /* creep speed so a run always finishes */
 #define RUN_CRUISE_TICKS_S      (RUN_CRUISE_MM_S * TICKS_PER_MM)
 #define RUN_ACCEL_TICKS_S2      (RUN_ACCEL_MM_S2 * TICKS_PER_MM)
@@ -111,7 +111,7 @@
 #define RUN_KFF                 0.012f   /* duty % per tick/s of reference (calibrate!) */
 #define RUN_KP                  0.010f   /* duty % per tick/s of speed error */
 #define RUN_KI                  0.050f   /* duty % per tick of accumulated speed error */
-#define RUN_I_MAX_DUTY          10.0f
+#define RUN_I_MAX_DUTY          15.0f
 
 #define SPEED_WINDOW_MS         20       /* min time between speed samples */
 #define SPEED_FILTER_ALPHA      0.5f
@@ -171,10 +171,11 @@
 #define NAV_SENSE_SETTLE_MS     100     /* wait after stopping before reading walls */
 #define NAV_START_DELAY_MS      500
 /* While running: decide for the next cell once this fraction of the way to its centre has
- * been covered (0.8 = 50 mm before the centre of a 250 mm cell). The front wall is then
- * ~0.7 cell ahead, so the "wall" limit sits halfway between 175 mm and 425 mm. */
-#define NAV_DECIDE_FRAC         0.8f
-#define NAV_RUN_FRONT_WALL_MM   300
+ * been covered (0.7 = 75 mm before the centre of a 250 mm cell). It must leave more than
+ * the braking distance v^2 / (2 * RUN_DECEL) = 34 mm at 450 mm/s. The front wall is then
+ * ~0.8 cell (200 mm) ahead, so the "wall" limit sits halfway between 200 mm and 450 mm. */
+#define NAV_DECIDE_FRAC         0.7f
+#define NAV_RUN_FRONT_WALL_MM   325
 #define NAV_POLL_MS             10
 #define NAV_MOVE_WAIT_MS        (SEGMENT_TIMEOUT_MS + 2000)
 #define NAV_MAX_STEPS           60
