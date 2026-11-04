@@ -192,7 +192,7 @@ static void bench_cell_cal_test(void)
 static void button_init(void)
 {
     gpio_config_t cfg = {
-        .pin_bit_mask = (1ULL << PIN_BUTTON),
+        .pin_bit_mask = (1ULL << PIN_BUTTON) | (1ULL << PIN_BUTTON_EXT),
         .mode         = GPIO_MODE_INPUT,
         .pull_up_en   = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
@@ -201,15 +201,22 @@ static void button_init(void)
     gpio_config(&cfg);
 }
 
+/* True while either the BOOT button or the external button is pressed. */
+static bool button_pressed(void)
+{
+    return gpio_get_level(PIN_BUTTON) == BUTTON_ACTIVE_LEVEL ||
+           gpio_get_level(PIN_BUTTON_EXT) == BUTTON_ACTIVE_LEVEL;
+}
+
 static void button_wait_press(void)
 {
     /* If button was held down during power-on/reset, wait for release */
-    while (gpio_get_level(PIN_BUTTON) == BUTTON_ACTIVE_LEVEL) {
+    while (button_pressed()) {
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 
     /* Wait for press */
-    while (gpio_get_level(PIN_BUTTON) != BUTTON_ACTIVE_LEVEL) {
+    while (!button_pressed()) {
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 
@@ -217,7 +224,7 @@ static void button_wait_press(void)
     vTaskDelay(pdMS_TO_TICKS(50));
 
     /* Wait for release */
-    while (gpio_get_level(PIN_BUTTON) == BUTTON_ACTIVE_LEVEL) {
+    while (button_pressed()) {
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 

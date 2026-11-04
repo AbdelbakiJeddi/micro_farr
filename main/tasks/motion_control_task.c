@@ -19,6 +19,7 @@ typedef struct {
     int32_t    start_right;
     int32_t    target_ticks;
     float      yaw_ref;
+    float      yaw_offset;   /* ToF-driven correction added to yaw_ref (deg) */
     float      current_duty;
     TickType_t start_tick;
 } straight_state_t;
@@ -44,7 +45,6 @@ static void set_status_note(const char *note)
     snprintf(s_status.note, sizeof(s_status.note), "%s", note);
 }
 
-#if !STEER_USE_TOF
 static float wrap180(float deg)
 {
     while (deg > 180.0f) {
@@ -55,7 +55,6 @@ static float wrap180(float deg)
     }
     return deg;
 }
-#endif
 
 static float clamp_float(float value, float limit)
 {
@@ -101,6 +100,7 @@ static void begin_straight(const sensor_snapshot_t *snapshot)
     s_straight.start_right  = snapshot->right_ticks;
     s_straight.target_ticks = s_target_ticks > 0 ? s_target_ticks : CELL_TICKS;
     s_straight.yaw_ref      = snapshot->yaw;
+    s_straight.yaw_offset   = 0.0f;
     s_straight.current_duty = MOTION_MIN_DUTY;
     s_straight.start_tick   = xTaskGetTickCount();
 
@@ -167,7 +167,6 @@ static void handle_command(motion_cmd_t cmd)
     }
 }
 
-#if STEER_USE_TOF
 static bool side_is_wall(int32_t tof_mm)
 {
     return tof_mm >= 0 && tof_mm < TOF_WALL_MAX_MM;
@@ -191,17 +190,38 @@ static float tof_lateral_error(const sensor_snapshot_t *snapshot)
     return 0.0f; /* no side walls: drive straight */
 }
 
-static float compute_steer(const sensor_snapshot_t *snapshot)
+/* ToF only: steer straight from the lateral error. */
+static float tof_only_steer(const sensor_snapshot_t *snapshot)
 {
     return clamp_float(TOF_CENTER_KP * tof_lateral_error(snapshot), TOF_CENTER_MAX_CORR);
 }
-#else
-static float compute_steer(const sensor_snapshot_t *snapshot)
+
+/* IMU inner loop: hold (yaw_ref + offset_deg). */
+static float yaw_hold_steer(const sensor_snapshot_t *snapshot, float offset_deg)
 {
-    float yaw_err = wrap180(s_straight.yaw_ref - snapshot->yaw);
+    float yaw_err = wrap180(s_straight.yaw_ref + offset_deg - snapshot->yaw);
     return clamp_float(YAW_KP * yaw_err, YAW_MAX_CORR);
 }
-#endif
+
+/* ToF outer loop: turn the lateral error into a smoothed heading offset. */
+static float tof_heading_offset(const sensor_snapshot_t *snapshot)
+{
+    float target = clamp_float(TOF_YAW_GAIN * tof_lateral_error(snapshot),
+                               TOF_YAW_MAX_OFFSET_DEG);
+    s_straight.yaw_offset += TOF_OFFSET_ALPHA * (target - s_straight.yaw_offset);
+    return s_straight.yaw_offset;
+}
+
+static float compute_steer(const sensor_snapshot_t *snapshot)
+{
+    if (STEER_MODE == STEER_MODE_YAW) {
+        return yaw_hold_steer(snapshot, 0.0f);
+    }
+    if (STEER_MODE == STEER_MODE_TOF) {
+        return tof_only_steer(snapshot);
+    }
+    return yaw_hold_steer(snapshot, tof_heading_offset(snapshot));
+}
 
 static void update_straight(const sensor_snapshot_t *snapshot)
 {

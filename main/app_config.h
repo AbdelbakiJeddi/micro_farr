@@ -86,11 +86,20 @@
 #define YAW_MAX_CORR            12.0f
 #define YAW_STEER_SIGN          1
 
-/* Straight-line steering source: 1 = side ToF centering only, 0 = IMU yaw hold */
-#define STEER_USE_TOF           1
+/* Straight-line steering source */
+#define STEER_MODE_YAW          0   /* IMU yaw hold only */
+#define STEER_MODE_TOF          1   /* side-ToF centering only */
+#define STEER_MODE_FUSED        2   /* IMU heading hold + ToF centering offset */
+#define STEER_MODE              STEER_MODE_FUSED
 #define TOF_WALL_MAX_MM         170    /* side reading below this counts as a wall */
 #define TOF_SIDE_TARGET_MM      85      /* (250 mm cell - 100 mm robot) / 2 */
 #define TOF_CENTER_KP           0.10f   /* duty per mm of lateral error */
 #define TOF_CENTER_MAX_CORR     14.0f
+
+/* Fused mode: ToF error -> heading offset (deg) fed to the IMU yaw loop.
+ * TOF_YAW_GAIN * YAW_KP ~= TOF_CENTER_KP, so both modes respond with similar strength. */
+#define TOF_YAW_GAIN            0.2f    /* deg of heading offset per mm of lateral error */
+#define TOF_YAW_MAX_OFFSET_DEG  15.0f
+#define TOF_OFFSET_ALPHA        0.1f    /* low-pass per 5 ms loop (~50 ms time constant) */
 
 #define SEGMENT_TIMEOUT_MS      5000
