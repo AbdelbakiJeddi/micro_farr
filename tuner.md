@@ -119,7 +119,33 @@ Pass: heading stays within ~±3° during a straight run.
 | Robot stalls at start | Raise `MOTION_MIN_DUTY` |
 | Overshoots the target | Lower `DIST_KP` or `MOTION_MAX_DUTY` |
 | Weaves left/right | Lower `YAW_KP` or `YAW_MAX_CORR` |
+| Turns harder instead of correcting | Flip `YAW_STEER_TY` | `12.0` | Base duty to get moving. Raise if the robot struggles to start. |
+| `TURN_MIN_DUTY` | `12.0` | Minimum turning duty; set just above stiction. |
+| `TURN_MAX_DUTY` | `25.0` | Speed cap. Lower it if turns overshoot. |
+| `TURN_ACCEL_SLEW` | `0.5` | Duty added per loop. Too high = wheel slip. |
+| `TURN_COAST_MS` | `120` | Predicted coast time after braking. Raise if turns overshoot, lower if they stop short. |
+| `TURN_SETTLE_MS` | `250` | Wait after braking before checking the final angle. |
+| `TURN_TIMEOUT_MS` | `3000` | Time allowed per 90°. Raise if slow turns fault. |
+
+How to read a run: the bench logs `yaw before -> after` and the expected delta (90° left, -90° right with `TURN_YAW_SIGN=1`).
+
+Pass: each turn stops within `TURN_TOL_DEG` of 90°, no timeout, no back-and-forth buzzing.
+
+## Quick troubleshooting
+
+| Symptom | Likely fix |
+|---|---|
+| Ticks decrease when pushing forward | Flip that wheel's `ENCODER_*_SIGN` |
+| Distance consistently short/long | Recalibrate `CELL_TICKS` |
+| Robot stalls at start | Raise `MOTION_MIN_DUTY` |
+| Overshoots the target | Lower `DIST_KP` or `MOTION_MAX_DUTY` |
+| Weaves left/right | Lower `YAW_KP` or `YAW_MAX_CORR` |
 | Turns harder instead of correcting | Flip `YAW_STEER_SIGN` |
+| Turn goes the wrong way | Flip `TURN_YAW_SIGN` |
+| Turn overshoots or buzzes | Raise `TURN_COAST_MS`, lower `TURN_KP` / `TURN_MAX_DUTY` |
+| Turn stops short | Lower `TURN_COAST_MS` |
+| Turn won't start | Raise `TURN_MIN_DUTY` / `TURN_FF_DUTY` |
+| Turn timeout | Raise `TURN_TIMEOUT_MS`, check `TURN_YAW_SIGN` and IMU |
 | Segment timeout | Raise `SEGMENT_TIMEOUT_MS` or check encoders |
 | Yaw drifts at rest | Increase `IMU_CALIB_SAMPLES`, keep robot still |
 | ToF readings invalid | Check address, XSHUT wiring, raise timeout |

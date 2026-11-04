@@ -19,10 +19,14 @@
 #define BENCH_CELL_CAL_TEST      0
 #define BENCH_CELL_CAL_PERIOD_MS 200
 
-#define BENCH_STRAIGHT_TEST      1
+#define BENCH_STRAIGHT_TEST      0
 #define BENCH_STRAIGHT_CELLS     5
 #define BENCH_STRAIGHT_REPEATS   1
 #define BENCH_STRAIGHT_DELAY_MS  500
+
+#define BENCH_TURN_TEST          1
+#define BENCH_TURN_REPEATS       4
+#define BENCH_TURN_DELAY_MS      800
 
 #define BUTTON_ACTIVE_LEVEL      0
 
@@ -87,3 +91,15 @@
 #define YAW_STEER_SIGN          1
 
 #define SEGMENT_TIMEOUT_MS      5000
+
+#define TURN_TARGET_DEG         90.0f
+#define TURN_TOL_DEG            2.0f
+#define TURN_YAW_SIGN           1
+#define TURN_KP                 1.0f
+#define TURN_FF_DUTY            12.0f
+#define TURN_MIN_DUTY           12.0f
+#define TURN_MAX_DUTY           25.0f
+#define TURN_ACCEL_SLEW         0.5f
+#define TURN_COAST_MS           120
+#define TURN_SETTLE_MS          250
+#define TURN_TIMEOUT_MS         3000

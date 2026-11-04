@@ -5,3 +5,5 @@
 void      motion_control_task_start(void);
 esp_err_t straight_cells(uint8_t cells);
 esp_err_t straight_one_cell(void);
+esp_err_t turn_left(void);
+esp_err_t turn_right(void);

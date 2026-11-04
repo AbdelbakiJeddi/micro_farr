@@ -11,7 +11,7 @@ ESP32-S3 micromouse. Tracks milestones, active files, and bench tests.
 | M4 | IMU yaw stability | Done |
 | M5 | Straight-cell PID | Implemented — CELL_TICKS=1495, five-cell bench armed; hardware run pending |
 | M6 | Yaw hold & centering | Partial — yaw-hold correction is implemented; side-ToF centering pending |
-| M7 | ±90° turns | Not started |
+| M7 | ±90° turns | Implemented — hardware run pending |
 | M8 | Wall recording | Not started |
 | M9 | Flood fill | Not started |
 
@@ -25,7 +25,7 @@ ESP32-S3 micromouse. Tracks milestones, active files, and bench tests.
 | `app_config.h` | Bench flags + tuning params |
 | `app_ipc.*` | Snapshot mailbox, motion command queue, status mailbox, event group |
 | `tasks/sensor_task.*` | 100 Hz encoder ticks + yaw + non-blocking ToF |
-| `tasks/motion_control_task.*` | 200 Hz tick-distance P + yaw-hold P, publishes status |
+| `tasks/motion_control_task.*` | 200 Hz tick-distance P, yaw-hold P, and ±90° turn controller |
 | `tasks/telemetry_task.*` | 20 Hz OLED telemetry, core 0 |
 | `drivers/i2c_bus.*` | I2C master, SDA 8 / SCL 9 |
 | `drivers/motor.*` | TB6612, 20 kHz LEDC |
@@ -56,6 +56,12 @@ ESP32-S3 micromouse. Tracks milestones, active files, and bench tests.
 - Gentle yaw heading correction `YAW_KP=0.5f`, `YAW_MAX_CORR=8.0f`.
 - Straight screen: `RUN`, `P [ticks]/7475`, `Y [yaw]`, `L[ticks] R[ticks]`.
 - Cell-cal screen: `CELL CAL`, `L`, `R`, `AVG`.
+
+## M7 notes
+- `turn_left()` / `turn_right()` queue `CMD_TURN_LEFT` / `CMD_TURN_RIGHT`; fixed 90° target.
+- Turn controller uses yaw P + feedforward + slew, same status/event path as straight segments.
+- `TURN_YAW_SIGN` flips the yaw direction convention without changing control logic.
+- `BENCH_TURN_TEST` runs alternating left/right turns triggered by the BOOT button.
 
 ## Firmware integration notes
 - `app_main` now initializes IPC, OLED telemetry, IMU calibration, ToF sensors, encoders,
