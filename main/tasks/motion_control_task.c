@@ -33,10 +33,21 @@ typedef struct {
     float    v;              /* filtered speed (ticks/s) */
 } speed_est_t;
 
+typedef enum {
+    TURN_DRIVE,
+    TURN_SETTLE,
+} turn_phase_t;
+
 typedef struct {
-    bool       active;
-    int        settle;      /* consecutive loops inside the tolerance */
-    TickType_t start_tick;
+    bool         active;
+    turn_phase_t phase;
+    float        target_yaw;
+    float        current_duty;
+    float        last_yaw;
+    float        rate_dps;
+    uint32_t     last_ms;
+    TickType_t   start_tick;
+    TickType_t   settle_tick;
 } turn_state_t;
 
 #define MOTION_DT_S (1.0f / (float)MOTION_TASK_HZ)
@@ -46,7 +57,7 @@ static speed_est_t      s_speed;
 static turn_state_t     s_turn;
 static bool             s_pending_straight;
 static bool             s_pending_turn;
-static float            s_pending_turn_deg;
+static bool             s_pending_turn_left;
 static int32_t          s_target_ticks = CELL_TICKS;
 
 /* Absolute heading the robot should be facing, carried from move to move so that
@@ -94,22 +105,22 @@ static float clamp_float(float value, float limit)
     return value;
 }
 
-static int clamp_duty(float duty)
+static int clamp_duty(float duty, float min_duty, float max_duty)
 {
-    if (duty > MOTION_MAX_DUTY) {
-        duty = MOTION_MAX_DUTY;
+    if (duty > max_duty) {
+        duty = max_duty;
     }
-    if (duty < -MOTION_MAX_DUTY) {
-        duty = -MOTION_MAX_DUTY;
+    if (duty < -max_duty) {
+        duty = -max_duty;
     }
 
     int out = (int)(duty >= 0.0f ? (duty + 0.5f) : (duty - 0.5f));
 
-    if (out > 0 && out < (int)MOTION_MIN_DUTY) {
-        out = (int)MOTION_MIN_DUTY;
+    if (out > 0 && out < (int)min_duty) {
+        out = (int)min_duty;
     }
-    if (out < 0 && out > -(int)MOTION_MIN_DUTY) {
-        out = -(int)MOTION_MIN_DUTY;
+    if (out < 0 && out > -(int)min_duty) {
+        out = -(int)min_duty;
     }
     return out;
 }
@@ -213,19 +224,29 @@ static void finish_straight(bool success)
     publish_result(success, "TIMEOUT");
 }
 
-static void begin_turn(const sensor_snapshot_t *snapshot, float delta_deg)
+static void begin_turn(const sensor_snapshot_t *snapshot, bool left)
 {
-    sync_heading_ref(snapshot);
-    s_heading_ref += delta_deg;
+    float direction = left ? 1.0f : -1.0f;
 
-    s_turn.active     = true;
-    s_turn.settle     = 0;
-    s_turn.start_tick = xTaskGetTickCount();
+    /* Turn relative to the carried heading reference, not to the current yaw, so the
+     * residual error of one turn is not added to the next. */
+    sync_heading_ref(snapshot);
+    s_heading_ref += direction * TURN_TARGET_DEG * (float)TURN_YAW_SIGN;
+
+    s_turn.active       = true;
+    s_turn.phase        = TURN_DRIVE;
+    s_turn.target_yaw   = s_heading_ref;
+    s_turn.current_duty = TURN_MIN_DUTY;
+    s_turn.last_yaw     = snapshot->yaw;
+    s_turn.rate_dps     = 0.0f;
+    s_turn.last_ms      = snapshot->timestamp_ms;
+    s_turn.start_tick   = xTaskGetTickCount();
+    s_turn.settle_tick  = s_turn.start_tick;
 
     s_status.state          = MOTION_RUNNING;
     s_status.progress_ticks = 0;
-    s_status.target_ticks   = 0;
-    set_status_note("TURN");
+    s_status.target_ticks   = (int32_t)TURN_TARGET_DEG;
+    set_status_note(left ? "TURN L" : "TURN R");
     publish_status();
 
     motor_enable(true);
@@ -279,14 +300,14 @@ static void extend_straight(void)
     }
 }
 
-static void queue_turn(float delta_deg)
+static void queue_turn(bool left)
 {
     if (motion_busy()) {
         ESP_LOGW(TAG, "turn ignored: motion active");
         return;
     }
-    s_pending_turn_deg = delta_deg;
-    s_pending_turn     = true;
+    s_pending_turn_left = left;
+    s_pending_turn      = true;
 }
 
 static void handle_command(motion_cmd_t cmd)
@@ -301,11 +322,11 @@ static void handle_command(motion_cmd_t cmd)
         break;
 
     case CMD_TURN_LEFT:
-        queue_turn(TURN_QUARTER_DEG);
+        queue_turn(true);
         break;
 
     case CMD_TURN_RIGHT:
-        queue_turn(-TURN_QUARTER_DEG);
+        queue_turn(false);
         break;
 
     case CMD_STOP:
@@ -455,31 +476,112 @@ static void update_straight(const sensor_snapshot_t *snapshot)
     motor_set_speed(&motor_right, right_cmd);
 }
 
-/* Pivot in place toward s_heading_ref using the gyro yaw. */
+/* Turn rate (deg/s) from successive yaw samples, used to predict the coast after braking. */
+static void turn_update_rate(const sensor_snapshot_t *snapshot)
+{
+    if (snapshot->timestamp_ms == s_turn.last_ms) {
+        return;
+    }
+
+    float dt_s = (float)(snapshot->timestamp_ms - s_turn.last_ms) / 1000.0f;
+    if (dt_s > 0.0f) {
+        s_turn.rate_dps = (snapshot->yaw - s_turn.last_yaw) / dt_s;
+    }
+    s_turn.last_yaw = snapshot->yaw;
+    s_turn.last_ms  = snapshot->timestamp_ms;
+}
+
+static void turn_enter_settle(float abs_err, TickType_t now)
+{
+    motors_brake();
+    s_turn.phase       = TURN_SETTLE;
+    s_turn.settle_tick = now;
+    s_turn.rate_dps    = 0.0f;
+
+    s_status.progress_ticks = (int32_t)(TURN_TARGET_DEG - abs_err);
+    publish_status();
+}
+
+/* Settle phase: wait for the robot to stop, then finish if on target or resume a slow
+ * correction. Returns true while the turn is still settling or has just finished. */
+static bool turn_handle_settle(float abs_err, TickType_t now)
+{
+    if (now - s_turn.settle_tick < pdMS_TO_TICKS(TURN_SETTLE_MS)) {
+        return true;
+    }
+    if (abs_err <= TURN_TOL_DEG) {
+        ESP_LOGI(TAG, "turn done: err=%.2f", abs_err);
+        s_status.progress_ticks = (int32_t)TURN_TARGET_DEG;
+        finish_turn(true);
+        return true;
+    }
+
+    /* Coasted past the target: resume a low-speed correction. */
+    s_turn.phase        = TURN_DRIVE;
+    s_turn.current_duty = TURN_MIN_DUTY;
+    s_turn.rate_dps     = 0.0f;
+    return false;
+}
+
+/* Duty magnitude for the remaining error, with an acceleration slew. */
+static float turn_next_duty(float abs_err)
+{
+    float target = TURN_FF_DUTY + TURN_KP * abs_err;
+    if (target > TURN_MAX_DUTY) {
+        target = TURN_MAX_DUTY;
+    }
+
+    if (s_turn.current_duty < target) {
+        s_turn.current_duty += TURN_ACCEL_SLEW;
+        if (s_turn.current_duty > target) {
+            s_turn.current_duty = target;
+        }
+    } else {
+        s_turn.current_duty = target;
+    }
+    return s_turn.current_duty;
+}
+
+/* Pivot in place toward the heading reference using the gyro yaw. */
 static void update_turn(const sensor_snapshot_t *snapshot)
 {
-    TickType_t elapsed = xTaskGetTickCount() - s_turn.start_tick;
-    if (elapsed > pdMS_TO_TICKS(TURN_TIMEOUT_MS)) {
+    TickType_t now = xTaskGetTickCount();
+
+    if (now - s_turn.start_tick > pdMS_TO_TICKS(TURN_TIMEOUT_MS)) {
         ESP_LOGE(TAG, "turn timeout");
         finish_turn(false);
         return;
     }
 
-    float err = wrap180(s_heading_ref - snapshot->yaw);
+    turn_update_rate(snapshot);
 
-    if (fabsf(err) < TURN_TOL_DEG) {
-        motors_brake();
-        if (++s_turn.settle >= TURN_SETTLE_LOOPS) {
-            finish_turn(true);
-        }
+    float yaw_err = wrap180(s_turn.target_yaw - snapshot->yaw);
+    float abs_err = fabsf(yaw_err);
+
+    if (s_turn.phase == TURN_SETTLE && turn_handle_settle(abs_err, now)) {
         return;
     }
 
-    s_turn.settle = 0;
-    float steer   = clamp_float(TURN_KP * err, MOTION_MAX_DUTY);
+    /* Predict how far the robot will coast after braking and stop early. */
+    float coast_deg  = s_turn.rate_dps * ((float)TURN_COAST_MS / 1000.0f);
+    float projected  = yaw_err - coast_deg;
+    bool  will_reach = (yaw_err > 0.0f && projected <= TURN_TOL_DEG) ||
+                       (yaw_err < 0.0f && projected >= -TURN_TOL_DEG);
 
-    motor_set_speed(&motor_left,  clamp_duty(-(float)YAW_STEER_SIGN * steer));
-    motor_set_speed(&motor_right, clamp_duty((float)YAW_STEER_SIGN * steer));
+    if (abs_err <= TURN_TOL_DEG || will_reach) {
+        turn_enter_settle(abs_err, now);
+        return;
+    }
+
+    s_status.progress_ticks = (int32_t)(TURN_TARGET_DEG - abs_err);
+    publish_status();
+
+    float duty        = turn_next_duty(abs_err);
+    float physical    = yaw_err * (float)TURN_YAW_SIGN;
+    float signed_duty = physical >= 0.0f ? duty : -duty;
+
+    motor_set_speed(&motor_left,  clamp_duty(-signed_duty, TURN_MIN_DUTY, TURN_MAX_DUTY));
+    motor_set_speed(&motor_right, clamp_duty(signed_duty, TURN_MIN_DUTY, TURN_MAX_DUTY));
 }
 
 static void start_pending_motion(const sensor_snapshot_t *snapshot)
@@ -489,7 +591,7 @@ static void start_pending_motion(const sensor_snapshot_t *snapshot)
         begin_straight(snapshot);
     } else if (s_pending_turn) {
         s_pending_turn = false;
-        begin_turn(snapshot, s_pending_turn_deg);
+        begin_turn(snapshot, s_pending_turn_left);
     }
 }
 

@@ -33,6 +33,10 @@
 #define BENCH_STRAIGHT_REPEATS   1
 #define BENCH_STRAIGHT_DELAY_MS  500
 
+#define BENCH_TURN_TEST          0
+#define BENCH_TURN_REPEATS       4
+#define BENCH_TURN_DELAY_MS      800
+
 #define BUTTON_ACTIVE_LEVEL      0
 
 #define ENCODER_HIGH_LIMIT      30000
@@ -58,6 +62,7 @@
 #define IMU_CALIB_SAMPLES       1000
 #define IMU_CALIB_DELAY_MS      2
 #define GYRO_LSB_PER_DPS        65.5f
+#define GYRO_SCALE              1.029f  /* sensitivity correction; 1.0 = none */
 
 #define TOF_DEFAULT_ADDR        0x29
 #define TOF_ADDR_LEFT           0x30
@@ -101,7 +106,7 @@
 #define RUN_DECEL_TICKS_S2      (RUN_DECEL_MM_S2 * TICKS_PER_MM)
 #define RUN_MIN_TICKS_S         (RUN_MIN_MM_S * TICKS_PER_MM)
 
-#define RUN_MAX_DUTY            40.0f    /* straight-run duty cap (turns use MOTION_MAX_DUTY) */
+#define RUN_MAX_DUTY            40.0f    /* straight-run duty cap (turns use TURN_MAX_DUTY) */
 #define RUN_START_DUTY          8.0f     /* integral pre-load to break static friction */
 #define RUN_KFF                 0.012f   /* duty % per tick/s of reference (calibrate!) */
 #define RUN_KP                  0.010f   /* duty % per tick/s of speed error */
@@ -136,12 +141,19 @@
 /* Front wall: emergency stop of a straight move when the front ToF reads below this */
 #define FRONT_STOP_MM           50
 
-/* Pivot turns (positive yaw = left / counter-clockwise) */
-#define TURN_QUARTER_DEG        90.0f
-#define TURN_KP                 0.5f    /* duty per degree of heading error */
-#define TURN_TOL_DEG            2.0f
-#define TURN_SETTLE_LOOPS       10      /* motion loops inside tolerance before "done" */
+/* Pivot turns (tuned on the robot, from nav_01) */
+#define TURN_TARGET_DEG         90.0f
+#define TURN_TOL_DEG            1.0f
+#define TURN_YAW_SIGN           1
+#define TURN_KP                 1.70f
+#define TURN_FF_DUTY            12.0f
+#define TURN_MIN_DUTY           12.0f
+#define TURN_MAX_DUTY           40.0f
+#define TURN_ACCEL_SLEW         0.8f
+#define TURN_COAST_MS           60
+#define TURN_SETTLE_MS          250
 #define TURN_TIMEOUT_MS         3000
+
 /* Heading reference carried between moves; re-captured after this idle time */
 #define HEADING_REF_TIMEOUT_MS  2000
 

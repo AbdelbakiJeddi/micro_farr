@@ -17,7 +17,7 @@
 #include "pins.h"
 #include "tof.h"
 
-#if BENCH_MOTOR_TEST || BENCH_ENCODER_TEST || BENCH_IMU_TEST || BENCH_TOF_TEST || BENCH_CELL_CAL_TEST || BENCH_STRAIGHT_TEST || BENCH_SPEED_CAL_TEST
+#if BENCH_MOTOR_TEST || BENCH_ENCODER_TEST || BENCH_IMU_TEST || BENCH_TOF_TEST || BENCH_CELL_CAL_TEST || BENCH_STRAIGHT_TEST || BENCH_TURN_TEST || BENCH_SPEED_CAL_TEST
 static const char *TAG = "bench";
 #endif
 
@@ -234,7 +234,7 @@ static void bench_straight_test(void)
     button_init();
 
     while (1) {
-        ESP_LOGI(TAG, "spawned in IDLE. Press BOOT button to launch (%d cells)...",
+        ESP_LOGI(TAG, "spawned in IDLE. Press button to launch (%d cells)...",
                  BENCH_STRAIGHT_CELLS);
 
         button_wait_press(BENCH_STRAIGHT_DELAY_MS);
@@ -269,6 +269,59 @@ static void bench_straight_test(void)
         }
 
         vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+#endif
+
+#if BENCH_TURN_TEST
+static void bench_turn_test(void)
+{
+    esp_log_level_set(TAG, ESP_LOG_INFO);
+    button_init();
+
+    while (1) {
+        ESP_LOGI(TAG, "spawned in IDLE. Press button to run %d turns...",
+                 BENCH_TURN_REPEATS);
+
+        button_wait_press(BENCH_TURN_DELAY_MS);
+
+        for (int i = 0; i < BENCH_TURN_REPEATS; i++) {
+            bool left = (i % 2) == 0;
+
+            sensor_snapshot_t before;
+            bool have_before = app_ipc_read_sensor(&before);
+            float start_yaw = have_before ? before.yaw : 0.0f;
+
+            ESP_LOGI(TAG, "turn %d/%d: %s", i + 1, BENCH_TURN_REPEATS,
+                     left ? "left" : "right");
+
+            esp_err_t err = left ? turn_left() : turn_right();
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "turn request failed: %s", esp_err_to_name(err));
+                break;
+            }
+
+            EventBits_t bits = app_ipc_wait_event(
+                APP_EVENT_SEGMENT_DONE | APP_EVENT_FAULT, true,
+                pdMS_TO_TICKS(TURN_TIMEOUT_MS + 1000));
+
+            sensor_snapshot_t after;
+            bool have_after = app_ipc_read_sensor(&after);
+            float end_yaw = have_after ? after.yaw : 0.0f;
+            float expected = (left ? 1.0f : -1.0f) * TURN_TARGET_DEG *
+                             (float)TURN_YAW_SIGN;
+
+            if (bits & APP_EVENT_SEGMENT_DONE) {
+                ESP_LOGI(TAG, "done: yaw %.1f -> %.1f (delta %.1f, expected %+.1f)",
+                         start_yaw, end_yaw, end_yaw - start_yaw, expected);
+            } else if (bits & APP_EVENT_FAULT) {
+                ESP_LOGE(TAG, "turn fault");
+            } else {
+                ESP_LOGE(TAG, "turn timeout waiting for completion");
+            }
+
+            vTaskDelay(pdMS_TO_TICKS(BENCH_TURN_DELAY_MS));
+        }
     }
 }
 #endif
@@ -321,6 +374,10 @@ bool bench_run_if_enabled(bench_init_fn_t init_fn)
 #elif BENCH_STRAIGHT_TEST
     if (init_fn) init_fn();
     bench_straight_test();
+    return true;
+#elif BENCH_TURN_TEST
+    if (init_fn) init_fn();
+    bench_turn_test();
     return true;
 #else
     (void)init_fn;

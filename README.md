@@ -86,7 +86,7 @@ All peripherals are interfaced with the **ESP32-S3-WROOM-1-N16R8** module accord
 ### Shared I2C Bus
 | Signal | GPIO | Connected Devices |
 |---|:---:|---|
-| **SDA** | `GPIO 8` | MPU6050, SSD1306 OLED, 3x VL53L0X ToF |
+| SDA** | `GPIO 8` | MPU6050, SSD1306 OLED, 3x VL53L0X ToF |
 | **SCL** | `GPIO 9` | MPU6050, SSD1306 OLED, 3x VL53L0X ToF |
 
 ### Quadrature Wheel Encoders
@@ -114,6 +114,11 @@ All peripherals are interfaced with the **ESP32-S3-WROOM-1-N16R8** module accord
 | **BIN1** | `GPIO 39` | Right Motor Direction 1 |
 | **BIN2** | `GPIO 40` | Right Motor Direction 2 |
 | **STBY** | `GPIO 41` | Driver Enable / Standby (Active HIGH) |
+
+### Bench Button
+| Signal | GPIO | Function |
+|---|:---:|---|
+| **BUTTON** | `GPIO 21` | Bench start trigger, active-low to GND (internal pull-up) |
 
 ### Reserved Pins (Do Not Reassign)
 - **`GPIO 33–37`**: Dedicated internal bus for Octal PSRAM.

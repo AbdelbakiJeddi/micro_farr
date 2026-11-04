@@ -56,7 +56,7 @@ static void render_frame(bool have_status, const motion_status_t *status,
     }
     oled_text_line(2, line);
 
-    if (have_status && status->state == MOTION_FAULT && status->note[0] != '\0') {
+    if (have_status && status->note[0] != '\0') {
         oled_text_line(3, status->note);
     } else if (have_snapshot) {
         snprintf(line, sizeof(line), "L%ld R%ld",
