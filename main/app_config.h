@@ -50,9 +50,10 @@
 
 #define IMU_ADDR_PRIMARY        0x68
 #define IMU_ADDR_ALT            0x69
-#define IMU_CALIB_SAMPLES       500
+#define IMU_CALIB_SAMPLES       1000
 #define IMU_CALIB_DELAY_MS      2
 #define GYRO_LSB_PER_DPS        65.5f
+#define GYRO_SCALE              1.029f  /* sensitivity correction; 1.0 = none */
 
 #define TOF_DEFAULT_ADDR        0x29
 #define TOF_ADDR_LEFT           0x30
@@ -93,13 +94,13 @@
 #define SEGMENT_TIMEOUT_MS      5000
 
 #define TURN_TARGET_DEG         90.0f
-#define TURN_TOL_DEG            2.0f
+#define TURN_TOL_DEG            1.0f
 #define TURN_YAW_SIGN           1
-#define TURN_KP                 1.0f
+#define TURN_KP                 1.70f
 #define TURN_FF_DUTY            12.0f
 #define TURN_MIN_DUTY           12.0f
-#define TURN_MAX_DUTY           25.0f
-#define TURN_ACCEL_SLEW         0.5f
-#define TURN_COAST_MS           120
+#define TURN_MAX_DUTY           40.0f
+#define TURN_ACCEL_SLEW         0.8f
+#define TURN_COAST_MS           60
 #define TURN_SETTLE_MS          250
 #define TURN_TIMEOUT_MS         3000

@@ -56,11 +56,29 @@ Bench: `BENCH_IMU_TEST`
 
 | Param | Current | What to do |
 |---|---|---|
-| `IMU_CALIB_SAMPLES` | `500` | Increase if yaw drifts at rest. Keep the robot still during boot. |
+| `IMU_CALIB_SAMPLES` | `1000` | Increase if yaw drifts at rest. Keep the robot still during boot. |
 | `IMU_CALIB_DELAY_MS` | `2` | Time between calibration samples. Usually leave alone. |
+| `GYRO_SCALE` | `1.029` | Sensitivity correction. Raise if turns read too small, lower if too large. |
 
 Pass: yaw drift under ~1°/min with the robot still.
 If drift is large, check the robot is not moving/vibrating during calibration.
+
+### Yaw scale calibration
+
+Use this when a physical 90° turn reads 87–88° on the IMU.
+
+1. Enable `BENCH_TELEMETRY_TEST` and flash, so the OLED shows `Y <yaw>`.
+2. Let the IMU calibrate with the robot still.
+3. Mark the starting direction, then rotate the robot exactly **360°** by hand on a flat surface.
+4. Read the final yaw (for example `Y 350.0`).
+5. Correct the scale:
+
+   ```
+   new_GYRO_SCALE = old_GYRO_SCALE * 360 / measured_degrees
+   ```
+
+   Example: `1.029 * 360 / 350 ≈ 1.058`.
+6. Rebuild, flash, and repeat 2–3 times until a physical 360° reads 360° ±2°.
 
 ## 4. ToF
 
@@ -110,20 +128,21 @@ Pass: 5 cells stop within ~2% of `5 * CELL_TICKS`, no timeout.
 
 Pass: heading stays within ~±3° during a straight run.
 
-## Quick troubleshooting
+## 8. Turns
 
-| Symptom | Likely fix |
-|---|---|
-| Ticks decrease when pushing forward | Flip that wheel's `ENCODER_*_SIGN` |
-| Distance consistently short/long | Recalibrate `CELL_TICKS` |
-| Robot stalls at start | Raise `MOTION_MIN_DUTY` |
-| Overshoots the target | Lower `DIST_KP` or `MOTION_MAX_DUTY` |
-| Weaves left/right | Lower `YAW_KP` or `YAW_MAX_CORR` |
-| Turns harder instead of correcting | Flip `YAW_STEER_TY` | `12.0` | Base duty to get moving. Raise if the robot struggles to start. |
+Bench: `BENCH_TURN_TEST`
+
+| Param | Current | What to do |
+|---|---|---|
+| `TURN_TARGET_DEG` | `90.0` | Turn angle. Leave at 90 for square cells. |
+| `TURN_TOL_DEG` | `1.0` | Finish tolerance. Too tight = extra small corrections; too loose = inaccurate turns. |
+| `TURN_YAW_SIGN` | `1` | Flip if a commanded left turn physically goes right. |
+| `TURN_KP` | `1.7` | Duty per degree of error. Too high = overshoot/buzz; too low = slow final approach. |
+| `TURN_FF_DUTY` | `12.0` | Base duty to get moving. Raise if the robot struggles to start. |
 | `TURN_MIN_DUTY` | `12.0` | Minimum turning duty; set just above stiction. |
-| `TURN_MAX_DUTY` | `25.0` | Speed cap. Lower it if turns overshoot. |
-| `TURN_ACCEL_SLEW` | `0.5` | Duty added per loop. Too high = wheel slip. |
-| `TURN_COAST_MS` | `120` | Predicted coast time after braking. Raise if turns overshoot, lower if they stop short. |
+| `TURN_MAX_DUTY` | `40.0` | Speed cap. Lower it if turns overshoot or the robot is unstable. |
+| `TURN_ACCEL_SLEW` | `0.8` | Duty added per loop. Too high = wheel slip. |
+| `TURN_COAST_MS` | `60` | Predicted stopping time after braking. Raise if turns overshoot, lower if they stop short. |
 | `TURN_SETTLE_MS` | `250` | Wait after braking before checking the final angle. |
 | `TURN_TIMEOUT_MS` | `3000` | Time allowed per 90°. Raise if slow turns fault. |
 

@@ -182,7 +182,7 @@ void imu_update_yaw(float dt_s)
     int16_t gz;
     if (read_gyro_z(&gz) != ESP_OK) return;
 
-    float rate_dps = (float)gz / GYRO_LSB_PER_DPS - s_gyro_bias_dps;
+    float rate_dps = ((float)gz / GYRO_LSB_PER_DPS - s_gyro_bias_dps) * GYRO_SCALE;
     s_yaw_deg += rate_dps * dt_s;
 }
 

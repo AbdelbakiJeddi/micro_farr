@@ -233,7 +233,7 @@ static void bench_straight_test(void)
     button_init();
 
     while (1) {
-        ESP_LOGI(TAG, "spawned in IDLE. Press BOOT button to launch (%d cells)...",
+        ESP_LOGI(TAG, "spawned in IDLE. Press button to launch (%d cells)...",
                  BENCH_STRAIGHT_CELLS);
 
         button_wait_press();
@@ -279,7 +279,7 @@ static void bench_turn_test(void)
     button_init();
 
     while (1) {
-        ESP_LOGI(TAG, "spawned in IDLE. Press BOOT button to run %d turns...",
+        ESP_LOGI(TAG, "spawned in IDLE. Press button to run %d turns...",
                  BENCH_TURN_REPEATS);
 
         button_wait_press();
