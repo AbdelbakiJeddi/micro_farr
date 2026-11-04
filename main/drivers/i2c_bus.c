@@ -2,6 +2,10 @@
 #include "pins.h"
 #include "app_config.h"
 
+#include "esp_log.h"
+
+static const char *TAG = "i2c_bus";
+
 static i2c_master_bus_handle_t s_bus = NULL;
 
 esp_err_t i2c_bus_init(void)
@@ -25,4 +29,19 @@ esp_err_t i2c_bus_init(void)
 i2c_master_bus_handle_t i2c_bus_handle(void)
 {
     return s_bus;
+}
+
+void i2c_bus_scan(void)
+{
+    if (!s_bus) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "scan start");
+    for (uint8_t addr = 0x08; addr < 0x78; addr++) {
+        if (i2c_master_probe(s_bus, addr, I2C_TIMEOUT_MS) == ESP_OK) {
+            ESP_LOGI(TAG, "found 0x%02X", addr);
+        }
+    }
+    ESP_LOGI(TAG, "scan done");
 }

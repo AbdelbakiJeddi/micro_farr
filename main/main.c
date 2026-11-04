@@ -3,76 +3,58 @@
 #include "freertos/task.h"
 
 #include "app_config.h"
+#include "app_ipc.h"
+#include "bench.h"
 #include "encoder.h"
 #include "imu.h"
+#include "motion_control_task.h"
 #include "motor.h"
+#include "sensor_task.h"
+#include "telemetry_task.h"
+#include "tof.h"
 
-static const char *TAG = "main";
+static void app_fatal(void) __attribute__((noreturn));
 
-#if BENCH_MOTOR_TEST
-static void bench_motor_test(void)
+static void app_fatal(void)
 {
-    motor_init();
-    motor_enable(true);
-
-    motor_set_speed(&motor_left, BENCH_MOTOR_SPEED);
-    vTaskDelay(pdMS_TO_TICKS(BENCH_MOTOR_TIME_MS));
-    motor_stop(&motor_left);
-
-    motor_set_speed(&motor_right, BENCH_MOTOR_SPEED);
-    vTaskDelay(pdMS_TO_TICKS(BENCH_MOTOR_TIME_MS));
-    motor_stop(&motor_right);
-
-    motor_enable(false);
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 }
-#endif
 
-#if BENCH_ENCODER_TEST
-static void bench_encoder_test(void)
+static void app_init_and_start(void)
 {
+    esp_log_level_set("*", ESP_LOG_NONE);
+
+    if (app_ipc_init() != ESP_OK) {
+        app_fatal();
+    }
+
+    telemetry_task_start();
+
+    if (imu_init() != ESP_OK || imu_calibrate(IMU_CALIB_SAMPLES) != ESP_OK) {
+        app_fatal();
+    }
+
+    if (tof_init_all() != ESP_OK) {
+        app_fatal();
+    }
+
     encoder_init();
+    motor_init();
+    motor_enable(false);
 
-    while (1) {
-        int32_t delta_l = encoder_get_delta(&encoder_left);
-        int32_t delta_r = encoder_get_delta(&encoder_right);
+    app_ipc_set_event(APP_EVENT_CALIBRATED);
 
-        ESP_LOGI(TAG, "L d=%ld t=%ld | R d=%ld t=%ld",
-                 (long)delta_l, (long)encoder_get_total(&encoder_left),
-                 (long)delta_r, (long)encoder_get_total(&encoder_right));
-
-        vTaskDelay(pdMS_TO_TICKS(BENCH_ENCODER_PERIOD_MS));
-    }
+    sensor_task_start();
+    motion_control_task_start();
 }
-#endif
-
-#if BENCH_IMU_TEST
-static void bench_imu_test(void)
-{
-    ESP_ERROR_CHECK(imu_init());
-    ESP_LOGI(TAG, "IMU detected: %s", imu_model_name());
-    ESP_ERROR_CHECK(imu_calibrate(IMU_CALIB_SAMPLES));
-
-    const float dt_s = (float)BENCH_IMU_PERIOD_MS / 1000.0f;
-
-    while (1) {
-        imu_update_yaw(dt_s);
-        ESP_LOGI(TAG, "yaw=%.1f", imu_get_yaw_deg());
-        vTaskDelay(pdMS_TO_TICKS(BENCH_IMU_PERIOD_MS));
-    }
-}
-#endif
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "micro_farr boot");
+    if (bench_run_if_enabled(app_init_and_start)) {
+        return;
+    }
 
-#if BENCH_MOTOR_TEST
-    bench_motor_test();
-#endif
-#if BENCH_ENCODER_TEST
-    bench_encoder_test();
-#endif
-#if BENCH_IMU_TEST
-    bench_imu_test();
-#endif
+    app_init_and_start();
 }

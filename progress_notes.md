@@ -1,45 +1,68 @@
-# Project Progress & Development Notes — `micro_farr`
+# Progress Notes — micro_farr
 
-This document tracks all active files, milestone progression, and hardware driver tests for the `micro_farr` ESP32-S3 micromouse robot.
+ESP32-S3 micromouse. Tracks milestones, active files, and bench tests.
 
----
+## Milestones
+| # | Milestone | Status |
+|---|-----------|--------|
+| M1 | Bring-up & I2C bus | Done |
+| M2 | ToF re-addressing | Done |
+| M3 | Motors & encoders | Done |
+| M4 | IMU yaw stability | Done |
+| M5 | Straight-cell PID | Implemented — CELL_TICKS=1495, five-cell bench armed; hardware run pending |
+| M6 | Yaw hold & centering | Partial — yaw-hold correction is implemented; side-ToF centering pending |
+| M7 | ±90° turns | Not started |
+| M8 | Wall recording | Not started |
+| M9 | Flood fill | Not started |
 
-## 1. Milestone Status Dashboard
+## Files (`main/`)
+| File | Role |
+|------|------|
+| `CMakeLists.txt` | Sources + component deps |
+| `idf_component.yml` | Managed dep `pkolt/vl53l0x` |
+| `pins.h` | GPIO map |
+| `app_types.h` | `robot_state_t`, `motion_cmd_t`, `sensor_snapshot_t`, `motion_status_t` |
+| `app_config.h` | Bench flags + tuning params |
+| `app_ipc.*` | Snapshot mailbox, motion command queue, status mailbox, event group |
+| `tasks/sensor_task.*` | 100 Hz encoder ticks + yaw + non-blocking ToF |
+| `tasks/motion_control_task.*` | 200 Hz tick-distance P + yaw-hold P, publishes status |
+| `tasks/telemetry_task.*` | 20 Hz OLED telemetry, core 0 |
+| `drivers/i2c_bus.*` | I2C master, SDA 8 / SCL 9 |
+| `drivers/motor.*` | TB6612, 20 kHz LEDC |
+| `drivers/encoder.*` | PCNT x4 quadrature |
+| `drivers/imu.*` | MPU6050/6500/9250, gyro-Z yaw |
+| `drivers/tof.*` | 3x VL53L0X, XSHUT re-address, cached readings |
+| `drivers/oled.*` | SH1106-compatible 128x64 text driver, page-addressed flush |
+| `bench.*` | Standalone & integrated bench tests runner |
+| `main.c` | Minimal entry point & task bootstrapper |
 
-| Milestone | Status | Description | Notes |
-|---|---|---|---|
-| **M1: Bringup & Bus** | 🟢 **Complete** | Project structure, pin map, modern `i2c_bus` driver | `i2c_bus` using ESP-IDF v6 `driver/i2c_master.h` on GPIO 8/9 |
-| **M2: ToF Re-addressing** | ⚪ Not Started | Sequential XSHUT toggling, addresses `0x30, 0x31, 0x32` | Next step after IMU verification |
-| **M3: Motors & Encoders** | 🟢 **Complete** | TB6612 LEDC PWM + PCNT hardware quadrature | `motor.c` + `encoder.c` fully implemented and bench-tested |
-| **M4: IMU Yaw Stability** | 🟢 **In Test** | MPU6050 probe, rest bias calibration, yaw integration | `imu.c` implemented; currently running `BENCH_IMU_TEST` |
-| **M5: Straight Cell PID** | ⚪ Not Started | Distance PID driving forward `CELL_TICKS` | Requires combining motor + encoder PID |
-| **M6: Yaw Hold & Centering** | ⚪ Not Started | Yaw lock + lateral ToF corridor centering | Requires M4 (IMU) + M2 (ToF) |
-| **M7: ±90° Accurate Turns** | ⚪ Not Started | Pivot turns using gyro feedback | Uses M4 (IMU) |
-| **M8: Wall Recording** | ⚪ Not Started | Cell-by-cell traversal with wall detection | Maze grid representation |
-| **M9: Full Flood Fill** | ⚪ Not Started | BFS flood fill exploration & shortest path solve | Navigation logic |
+## Bench Tests
+| Test | Flag | Result |
+|------|------|--------|
+| Motor | `BENCH_MOTOR_TEST` | OK — 30% duty, fwd/rev both wheels |
+| Encoder | `BENCH_ENCODER_TEST` | OK — PCNT delta/total both wheels |
+| IMU | `BENCH_IMU_TEST` | OK — MPU6500, drift <0.1°/12 s, ±90° tracks |
+| ToF | `BENCH_TOF_TEST` | OK — 3x VL53L0X re-addressed, L/F/R mm @ 10 Hz |
+| Cell cal | `BENCH_CELL_CAL_TEST` | OK — hand-push one cell: L=1489 R=1502 avg=1495 |
+| OLED | `BENCH_OLED_TEST` | OK — SH1106-compatible, 0x3C, full white/black/text |
+| Telemetry | `BENCH_TELEMETRY_TEST` | OK — 4-line IDLE screen, yaw + ticks update live |
+| Straight | `BENCH_STRAIGHT_TEST` | Armed — 5 cells (7475 ticks, ~90 cm), soft-start slew |
 
-*Legend: 🟢 Complete | 🟡 In Progress / In Test | ⚪ Not Started*
+## M5 notes
+- `CELL_TICKS` is set to the measured average, 1495.
+- `BENCH_STRAIGHT_TEST` is enabled with `BENCH_STRAIGHT_CELLS=5` (~90 cm).
+- Smooth acceleration slew rate `MOTION_ACCEL_SLEW=0.5` prevents torque spikes.
+- Safe testing duty capped at `MOTION_MAX_DUTY=30.0f`.
+- Gentle yaw heading correction `YAW_KP=0.5f`, `YAW_MAX_CORR=8.0f`.
+- Straight screen: `RUN`, `P [ticks]/7475`, `Y [yaw]`, `L[ticks] R[ticks]`.
+- Cell-cal screen: `CELL CAL`, `L`, `R`, `AVG`.
 
----
-
-## 2. Codebase File Map (`main/`)
-
-| File | Status | Description |
-|---|---|---|
-| [`main/CMakeLists.txt`](file:///home/abok-omen/Desktop/Abok/embedded/micro_farr/main/CMakeLists.txt) | 🟢 Active | Registers `main.c`, `i2c_bus.c`, `motor.c`, `encoder.c`, `imu.c`; requires `esp_driver_gpio`, `esp_driver_ledc`, `esp_driver_pcnt`, `esp_driver_i2c`, `freertos` |
-| [`main/pins.h`](file:///home/abok-omen/Desktop/Abok/embedded/micro_farr/main/pins.h) | 🟢 Active | Hardware GPIO definitions matching `hardware.md` |
-| [`main/app_types.h`](file:///home/abok-omen/Desktop/Abok/embedded/micro_farr/main/app_types.h) | 🟢 Active | Enums (`robot_state_t`, `motion_cmd_t`, `imu_model_t`) and structs |
-| [`main/app_config.h`](file:///home/abok-omen/Desktop/Abok/embedded/micro_farr/main/app_config.h) | 🟢 Active | Bench test selectors (`BENCH_MOTOR_TEST`, `BENCH_ENCODER_TEST`, `BENCH_IMU_TEST`), I2C/PCNT/IMU parameters |
-| [`main/drivers/i2c_bus.h`](file:///home/abok-omen/Desktop/Abok/embedded/micro_farr/main/drivers/i2c_bus.h) / [`.c`](file:///home/abok-omen/Desktop/Abok/embedded/micro_farr/main/drivers/i2c_bus.c) | 🟢 Active | Modern ESP-IDF v6 `i2c_master` bus master initialization on GPIO 8 (SDA) and 9 (SCL) |
-| [`main/drivers/motor.h`](file:///home/abok-omen/Desktop/Abok/embedded/micro_farr/main/drivers/motor.h) / [`.c`](file:///home/abok-omen/Desktop/Abok/embedded/micro_farr/main/drivers/motor.c) | 🟢 Active | TB6612FNG dual motor driver via 20 kHz 10-bit LEDC PWM, standby gating, direction control |
-| [`main/drivers/encoder.h`](file:///home/abok-omen/Desktop/Abok/embedded/micro_farr/main/drivers/encoder.h) / [`.c`](file:///home/abok-omen/Desktop/Abok/embedded/micro_farr/main/drivers/encoder.c) | 🟢 Active | Hardware Pulse Counter (`pulse_cnt`) 4x quadrature decoding with 1000 ns glitch filter |
-| [`main/drivers/imu.h`](file:///home/abok-omen/Desktop/Abok/embedded/micro_farr/main/drivers/imu.h) / [`.c`](file:///home/abok-omen/Desktop/Abok/embedded/micro_farr/main/drivers/imu.c) | 🟢 Active | MPU6050/6500/9250 auto-probe, wake, DLPF (42 Hz), 500-sample rest bias calibration, yaw integration |
-| [`main/main.c`](file:///home/abok-omen/Desktop/Abok/embedded/micro_farr/main/main.c) | 🟢 Active | Boot entrypoint and bench test runners (motor, encoder, IMU) |
-
----
-
-## 3. Bench Test Log
-
-- **Bench Motor Test (`BENCH_MOTOR_TEST`)**: Verified forward/reverse spin on left and right channels at 30% duty cycle for 2000 ms.
-- **Bench Encoder Test (`BENCH_ENCODER_TEST`)**: Verified hardware PCNT delta and cumulative ticks on both wheels at 100 ms period.
-- **Bench IMU Test (`BENCH_IMU_TEST`)**: Auto-probes `0x68`/`0x69`, reads `WHO_AM_I`, performs rest bias calibration across 500 samples, and logs yaw in degrees at 10 Hz.
+## Firmware integration notes
+- `app_main` now initializes IPC, OLED telemetry, IMU calibration, ToF sensors, encoders,
+  and motors before starting the sensor and motion tasks.
+- Sensor snapshots are published at 100 Hz and motion control runs at 200 Hz on core 1;
+  OLED telemetry runs at 20 Hz on core 0.
+- Motion commands and status/events are routed through `app_ipc`; turn commands are
+  intentionally rejected until the turn controller is implemented.
+- The next hardware checkpoint is to run `BENCH_STRAIGHT_TEST`, verify five-cell
+  travel and yaw correction, then tune `CELL_TICKS`, `DIST_KP`, and `YAW_KP`.

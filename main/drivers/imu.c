@@ -119,6 +119,7 @@ esp_err_t imu_init(void)
     if (err != ESP_OK) return err;
 
     s_model = identify_model(who);
+
     return configure_device();
 }
 
@@ -141,18 +142,38 @@ esp_err_t imu_calibrate(uint16_t samples)
 {
     if (!s_dev || samples == 0) return ESP_ERR_INVALID_STATE;
 
-    int64_t sum = 0;
-    int16_t gz;
+    /* Settling delay for sensor PLL & DLPF to stabilize after boot */
+    vTaskDelay(pdMS_TO_TICKS(150));
 
-    for (uint16_t i = 0; i < samples; i++) {
-        esp_err_t err = read_gyro_z(&gz);
-        if (err != ESP_OK) return err;
-        sum += gz;
-        vTaskDelay(pdMS_TO_TICKS(IMU_CALIB_DELAY_MS));
+    int16_t gz;
+    const uint8_t max_attempts = 5;
+
+    for (uint8_t attempt = 0; attempt < max_attempts; attempt++) {
+        int64_t sum = 0;
+        int16_t min_gz = 32767;
+        int16_t max_gz = -32768;
+
+        for (uint16_t i = 0; i < samples; i++) {
+            esp_err_t err = read_gyro_z(&gz);
+            if (err != ESP_OK) return err;
+
+            sum += gz;
+            if (gz < min_gz) min_gz = gz;
+            if (gz > max_gz) max_gz = gz;
+
+            vTaskDelay(pdMS_TO_TICKS(IMU_CALIB_DELAY_MS));
+        }
+
+        /* 120 LSBs pk-pk at 65.5 LSB/dps is ~1.8 dps threshold for stillness */
+        if ((max_gz - min_gz) < 120 || attempt == max_attempts - 1) {
+            s_gyro_bias_dps = ((float)sum / samples) / GYRO_LSB_PER_DPS;
+            s_yaw_deg = 0.0f;
+            return ESP_OK;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(200));
     }
 
-    s_gyro_bias_dps = ((float)sum / samples) / GYRO_LSB_PER_DPS;
-    s_yaw_deg = 0.0f;
     return ESP_OK;
 }
 

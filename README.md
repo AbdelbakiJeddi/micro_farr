@@ -21,6 +21,50 @@ The primary objective of the robot is autonomous maze exploration and path resol
 
 ---
 
+## Current Implementation Status
+
+The current firmware baseline is focused on bring-up and straight-cell motion:
+
+- Shared I2C bus at 400 kHz for the MPU6050, OLED, and three VL53L0X sensors.
+- VL53L0X XSHUT sequencing and per-sensor address assignment (`0x30`–`0x32`).
+- Quadrature encoder totals published through the sensor snapshot mailbox.
+- 100 Hz sensor task for ToF servicing, gyro yaw integration, and encoder sampling.
+- 200 Hz motion task for multi-cell straight segments, tick-distance control, acceleration slew, and yaw-hold correction.
+- 20 Hz OLED telemetry task showing motion state, progress, yaw, and wheel ticks.
+- Configurable bench tests for motors, encoders, IMU, ToF, cell calibration, OLED, telemetry, and straight motion.
+
+Flood-fill navigation, wall recording, and accurate pivot turns remain planned work. See
+[`progress_notes.md`](progress_notes.md) for the milestone dashboard and bench results.
+
+## Firmware Architecture
+
+Application code is organized into three layers:
+
+| Layer | Location | Responsibility |
+|---|---|---|
+| Drivers | `main/drivers/` | Motor, encoder, I2C, IMU, ToF, and OLED hardware access |
+| Tasks | `main/tasks/` | Periodic sensing, motion control, and telemetry |
+| Application | `main/` | Configuration, IPC, bench selection, and startup |
+
+Tasks communicate through the IPC interfaces in `main/app_ipc.*`; tuning constants and
+bench flags are centralized in `main/app_config.h`.
+
+## Build and Flash
+
+The project targets the ESP32-S3-WROOM-1-N16R8 and uses ESP-IDF 6.1:
+
+```bash
+source ~/.espressif/v6.1/esp-idf/export.sh
+idf.py set-target esp32s3
+idf.py build
+idf.py -p /dev/ttyUSB0 flash monitor
+```
+
+Set the desired `BENCH_*` flag in `main/app_config.h` before building. The safe straight
+bench defaults to five cells, a 30% duty cap, and a measured `CELL_TICKS` value of 1495.
+
+---
+
 ## Hardware Architecture
 
 | Component | Model / Type | Quantity | Purpose |

@@ -1,0 +1,21 @@
+dependencies:
+  idf:
+    source:
+      type: idf
+    version: 6.1.0
+  pkolt/vl53l0x:
+    component_hash: 691a1bad67092302d699114ba943e5ee523f6ffbe708a69bb62c7583a74be622
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=6.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.0.0
+direct_dependencies:
+- idf
+- pkolt/vl53l0x
+manifest_hash: 15cb6f4153e1fd4a121a9cadeaf1af800f0b3862bcfec44b245c26d2a1eb2ea3
+target: esp32s3
+version: 3.0.0

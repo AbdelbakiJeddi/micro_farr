@@ -23,3 +23,5 @@
 #define PIN_MOTOR_R_IN2    GPIO_NUM_40
 
 #define PIN_MOTOR_STBY     GPIO_NUM_41
+
+#define PIN_BUTTON         GPIO_NUM_0

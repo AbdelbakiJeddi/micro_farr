@@ -5,3 +5,4 @@
 
 esp_err_t i2c_bus_init(void);
 i2c_master_bus_handle_t i2c_bus_handle(void);
+void i2c_bus_scan(void);
