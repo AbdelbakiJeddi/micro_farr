@@ -6,14 +6,12 @@ Autonomous micromouse robot powered by the ESP32-S3 microcontroller, designed fo
 
 ## Gallery
 
-![micro_farr seen from above](assets/principle_img.jpg)
-*Top view of the micromouse.*
-
-![micro_farr wiring, underside](assets/maze_v_2.0_soldering.jpg)
-*Wiring on the underside of the robot.*
-
-![micro_farr testing in a real maze](assets/micro_Farr_InMaze.jpg)
-*Testing the robot in a real maze.*
+<p align="center">
+  <img src="assets/principle_img.jpg" width="250" alt="Top view of micro_farr">
+  <img src="assets/maze_v_2.0_soldering.jpg" width="250" alt="Wiring on the underside">
+  <img src="assets/micro_Farr_InMaze.jpg" width="250" alt="Testing in a real maze">
+</p>
+<p align="center"><em>Top view &nbsp;|&nbsp; Underside wiring &nbsp;|&nbsp; Testing in a real maze</em></p>
 
 ---
 
