@@ -4,6 +4,19 @@ Autonomous micromouse robot powered by the ESP32-S3 microcontroller, designed fo
 
 ---
 
+## Gallery
+
+![micro_farr seen from above](assets/principle_img.jpg)
+*Top view of the micromouse.*
+
+![micro_farr wiring, underside](assets/maze_v_2.0_soldering.png)
+*Wiring on the underside of the robot.*
+
+![micro_farr testing in a real maze](assets/micro_Farr_InMaze.jpg)
+*Testing the robot in a real maze.*
+
+---
+
 ## Overview
 
 **micro_farr** is a compact, two-wheeled autonomous mobile robot built to solve standard grid mazes. Leveraging the dual-core processing power of the ESP32-S3, the robot combines real-time sensor feedback, closed-loop motion control, and autonomous decision-making to navigate maze environments without external assistance or remote intervention.
