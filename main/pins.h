@@ -25,4 +25,6 @@
 #define PIN_MOTOR_STBY     GPIO_NUM_41
 
 #define PIN_BUTTON         GPIO_NUM_0    /* on-board BOOT button */
-#define PIN_BUTTON_EXT     GPIO_NUM_21   /* external start button: GPIO21 -> switch -> GND */
+#define PIN_BUTTON_EXT     GPIO_NUM_21   /* BTN_SEL: advance cursor / maze start */
+#define PIN_BUTTON_INC     GPIO_NUM_47   /* BTN_INC: increment selected param */
+#define PIN_BUTTON_DEC     GPIO_NUM_48   /* BTN_DEC: decrement selected param */

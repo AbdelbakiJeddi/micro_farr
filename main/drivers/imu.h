@@ -18,3 +18,4 @@ const char *imu_model_name(void);
 esp_err_t   imu_calibrate(uint16_t samples);
 void        imu_update_yaw(float dt_s);
 float       imu_get_yaw_deg(void);
+float       imu_get_rate_dps(void);   /* last bias-corrected, scaled yaw rate */

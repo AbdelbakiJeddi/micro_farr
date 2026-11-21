@@ -79,6 +79,13 @@ static void render_frame(bool have_status, const motion_status_t *status,
     oled_flush();
 }
 
+static volatile bool s_oled_active = true;
+
+void telemetry_set_oled_active(bool active)
+{
+    s_oled_active = active;
+}
+
 static void telemetry_task(void *arg)
 {
     (void)arg;
@@ -87,13 +94,15 @@ static void telemetry_task(void *arg)
     TickType_t last_wake = xTaskGetTickCount();
 
     while (1) {
-        motion_status_t status;
-        sensor_snapshot_t snapshot;
+        if (s_oled_active) {
+            motion_status_t status;
+            sensor_snapshot_t snapshot;
 
-        bool have_status = app_ipc_read_status(&status);
-        bool have_snapshot = app_ipc_read_sensor(&snapshot);
+            bool have_status   = app_ipc_read_status(&status);
+            bool have_snapshot = app_ipc_read_sensor(&snapshot);
 
-        render_frame(have_status, &status, have_snapshot, &snapshot);
+            render_frame(have_status, &status, have_snapshot, &snapshot);
+        }
 
         vTaskDelayUntil(&last_wake, period);
     }

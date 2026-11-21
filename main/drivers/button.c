@@ -12,7 +12,8 @@
 void button_init(void)
 {
     gpio_config_t cfg = {
-        .pin_bit_mask = (1ULL << PIN_BUTTON) | (1ULL << PIN_BUTTON_EXT),
+        .pin_bit_mask = (1ULL << PIN_BUTTON) | (1ULL << PIN_BUTTON_EXT) |
+                        (1ULL << PIN_BUTTON_INC) | (1ULL << PIN_BUTTON_DEC),
         .mode         = GPIO_MODE_INPUT,
         .pull_up_en   = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
@@ -25,6 +26,26 @@ bool button_pressed(void)
 {
     return gpio_get_level(PIN_BUTTON) == BUTTON_ACTIVE_LEVEL ||
            gpio_get_level(PIN_BUTTON_EXT) == BUTTON_ACTIVE_LEVEL;
+}
+
+bool button_boot_pressed(void)
+{
+    return gpio_get_level(PIN_BUTTON) == BUTTON_ACTIVE_LEVEL;
+}
+
+bool button_sel_pressed(void)
+{
+    return gpio_get_level(PIN_BUTTON_EXT) == BUTTON_ACTIVE_LEVEL;
+}
+
+bool button_inc_pressed(void)
+{
+    return gpio_get_level(PIN_BUTTON_INC) == BUTTON_ACTIVE_LEVEL;
+}
+
+bool button_dec_pressed(void)
+{
+    return gpio_get_level(PIN_BUTTON_DEC) == BUTTON_ACTIVE_LEVEL;
 }
 
 static void wait_while(bool pressed)

@@ -24,6 +24,7 @@ typedef struct {
     int32_t  right_tof;
     int32_t  front_tof;
     float    yaw;
+    float    yaw_rate_dps;
     int32_t  left_ticks;
     int32_t  right_ticks;
     uint32_t timestamp_ms;

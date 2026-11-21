@@ -24,6 +24,7 @@ static i2c_master_dev_handle_t s_dev;
 static imu_model_t s_model = IMU_MODEL_UNKNOWN;
 static float s_gyro_bias_dps;
 static float s_yaw_deg;
+static float s_rate_dps;
 
 static esp_err_t write_reg(uint8_t reg, uint8_t value)
 {
@@ -182,11 +183,16 @@ void imu_update_yaw(float dt_s)
     int16_t gz;
     if (read_gyro_z(&gz) != ESP_OK) return;
 
-    float rate_dps = ((float)gz / GYRO_LSB_PER_DPS - s_gyro_bias_dps) * GYRO_SCALE;
-    s_yaw_deg += rate_dps * dt_s;
+    s_rate_dps = ((float)gz / GYRO_LSB_PER_DPS - s_gyro_bias_dps) * GYRO_SCALE;
+    s_yaw_deg += s_rate_dps * dt_s;
 }
 
 float imu_get_yaw_deg(void)
 {
     return s_yaw_deg;
+}
+
+float imu_get_rate_dps(void)
+{
+    return s_rate_dps;
 }

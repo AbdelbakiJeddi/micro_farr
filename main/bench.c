@@ -14,10 +14,11 @@
 #include "motor.h"
 #include "navigation_task.h"
 #include "oled.h"
+#include "tuning_task.h"
 #include "pins.h"
 #include "tof.h"
 
-#if BENCH_MOTOR_TEST || BENCH_ENCODER_TEST || BENCH_IMU_TEST || BENCH_TOF_TEST || BENCH_CELL_CAL_TEST || BENCH_STRAIGHT_TEST || BENCH_TURN_TEST || BENCH_SPEED_CAL_TEST
+#if BENCH_MOTOR_TEST || BENCH_ENCODER_TEST || BENCH_IMU_TEST || BENCH_TOF_TEST
 static const char *TAG = "bench";
 #endif
 
@@ -146,186 +147,6 @@ static void bench_tof_test(void)
 }
 #endif
 
-#if BENCH_CELL_CAL_TEST
-static void bench_cell_cal_test(void)
-{
-    bool oled_ok = (oled_init() == ESP_OK);
-    if (oled_ok) {
-        esp_log_level_set("*", ESP_LOG_NONE);
-    }
-
-    encoder_init();
-
-    int32_t start_l = encoder_get_total(&encoder_left);
-    int32_t start_r = encoder_get_total(&encoder_right);
-
-    while (1) {
-        int32_t left  = encoder_get_total(&encoder_left) - start_l;
-        int32_t right = encoder_get_total(&encoder_right) - start_r;
-        int32_t avg   = (left + right) / 2;
-
-        if (oled_ok) {
-            char line[22];
-
-            oled_clear();
-            oled_text_line(0, "CELL CAL");
-
-            snprintf(line, sizeof(line), "L %ld", (long)left);
-            oled_text_line(1, line);
-
-            snprintf(line, sizeof(line), "R %ld", (long)right);
-            oled_text_line(2, line);
-
-            snprintf(line, sizeof(line), "AVG %ld", (long)avg);
-            oled_text_line(3, line);
-
-            oled_flush();
-        } else {
-            ESP_LOGI(TAG, "L=%ld R=%ld avg=%ld",
-                     (long)left, (long)right, (long)avg);
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(BENCH_CELL_CAL_PERIOD_MS));
-    }
-}
-#endif
-
-#if BENCH_SPEED_CAL_TEST
-static int32_t wheel_ticks_avg(void)
-{
-    return (encoder_get_total(&encoder_left) * ENCODER_LEFT_SIGN +
-            encoder_get_total(&encoder_right) * ENCODER_RIGHT_SIGN) / 2;
-}
-
-/* Steps both wheels through a range of duties and prints the measured speed. Use the
- * ticks/s at the duty that matches RUN_CRUISE_MM_S to set RUN_KFF = duty / (ticks/s). */
-static void bench_speed_cal_test(void)
-{
-    motor_init();
-    encoder_init();
-    motor_enable(true);
-
-    while (1) {
-        for (int duty = BENCH_SPEED_CAL_START; duty <= BENCH_SPEED_CAL_MAX;
-             duty += BENCH_SPEED_CAL_STEP) {
-            motor_set_speed(&motor_left, duty);
-            motor_set_speed(&motor_right, duty);
-            vTaskDelay(pdMS_TO_TICKS(BENCH_SPEED_CAL_SETTLE_MS));
-
-            int32_t start = wheel_ticks_avg();
-            vTaskDelay(pdMS_TO_TICKS(BENCH_SPEED_CAL_MEASURE_MS));
-            int32_t ticks_s = (wheel_ticks_avg() - start) * 1000 / BENCH_SPEED_CAL_MEASURE_MS;
-
-            ESP_LOGI(TAG, "duty=%d%% -> %ld ticks/s (%ld mm/s)", duty, (long)ticks_s,
-                     (long)((float)ticks_s / TICKS_PER_MM));
-        }
-        motor_set_speed(&motor_left, 0);
-        motor_set_speed(&motor_right, 0);
-        ESP_LOGI(TAG, "--- cycle done, repeating in 3 s ---");
-        vTaskDelay(pdMS_TO_TICKS(3000));
-    }
-}
-#endif
-
-#if BENCH_STRAIGHT_TEST
-static void bench_straight_test(void)
-{
-    esp_log_level_set(TAG, ESP_LOG_INFO);
-    button_init();
-
-    while (1) {
-        ESP_LOGI(TAG, "spawned in IDLE. Press button to launch (%d cells)...",
-                 BENCH_STRAIGHT_CELLS);
-
-        button_wait_press(BENCH_STRAIGHT_DELAY_MS);
-
-        ESP_LOGI(TAG, "button pressed! Starting straight run (%d cells, %ld ticks)",
-                 BENCH_STRAIGHT_CELLS,
-                 (long)(BENCH_STRAIGHT_CELLS * CELL_TICKS));
-
-        esp_err_t err = straight_cells(BENCH_STRAIGHT_CELLS);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "straight_cells failed: %s", esp_err_to_name(err));
-            continue;
-        }
-
-        uint32_t wait_ms = (SEGMENT_TIMEOUT_MS * BENCH_STRAIGHT_CELLS) + 2000;
-        EventBits_t bits = app_ipc_wait_event(
-            APP_EVENT_SEGMENT_DONE | APP_EVENT_FAULT, true,
-            pdMS_TO_TICKS(wait_ms));
-
-        sensor_snapshot_t snapshot;
-        bool have_snapshot = app_ipc_read_sensor(&snapshot);
-
-        if (bits & APP_EVENT_SEGMENT_DONE) {
-            ESP_LOGI(TAG, "run done: L=%ld R=%ld yaw=%.1f",
-                     (long)(have_snapshot ? snapshot.left_ticks : 0),
-                     (long)(have_snapshot ? snapshot.right_ticks : 0),
-                     have_snapshot ? snapshot.yaw : 0.0f);
-        } else if (bits & APP_EVENT_FAULT) {
-            ESP_LOGE(TAG, "run fault");
-        } else {
-            ESP_LOGE(TAG, "run timeout waiting for segment");
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-}
-#endif
-
-#if BENCH_TURN_TEST
-static void bench_turn_test(void)
-{
-    esp_log_level_set(TAG, ESP_LOG_INFO);
-    button_init();
-
-    while (1) {
-        ESP_LOGI(TAG, "spawned in IDLE. Press button to run %d turns...",
-                 BENCH_TURN_REPEATS);
-
-        button_wait_press(BENCH_TURN_DELAY_MS);
-
-        for (int i = 0; i < BENCH_TURN_REPEATS; i++) {
-            bool left = (i % 2) == 0;
-
-            sensor_snapshot_t before;
-            bool have_before = app_ipc_read_sensor(&before);
-            float start_yaw = have_before ? before.yaw : 0.0f;
-
-            ESP_LOGI(TAG, "turn %d/%d: %s", i + 1, BENCH_TURN_REPEATS,
-                     left ? "left" : "right");
-
-            esp_err_t err = left ? turn_left() : turn_right();
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "turn request failed: %s", esp_err_to_name(err));
-                break;
-            }
-
-            EventBits_t bits = app_ipc_wait_event(
-                APP_EVENT_SEGMENT_DONE | APP_EVENT_FAULT, true,
-                pdMS_TO_TICKS(TURN_TIMEOUT_MS + 1000));
-
-            sensor_snapshot_t after;
-            bool have_after = app_ipc_read_sensor(&after);
-            float end_yaw = have_after ? after.yaw : 0.0f;
-            float expected = (left ? 1.0f : -1.0f) * TURN_TARGET_DEG *
-                             (float)TURN_YAW_SIGN;
-
-            if (bits & APP_EVENT_SEGMENT_DONE) {
-                ESP_LOGI(TAG, "done: yaw %.1f -> %.1f (delta %.1f, expected %+.1f)",
-                         start_yaw, end_yaw, end_yaw - start_yaw, expected);
-            } else if (bits & APP_EVENT_FAULT) {
-                ESP_LOGE(TAG, "turn fault");
-            } else {
-                ESP_LOGE(TAG, "turn timeout waiting for completion");
-            }
-
-            vTaskDelay(pdMS_TO_TICKS(BENCH_TURN_DELAY_MS));
-        }
-    }
-}
-#endif
-
 bool bench_run_if_enabled(bench_init_fn_t init_fn)
 {
 #if BENCH_OLED_TEST
@@ -352,32 +173,19 @@ bool bench_run_if_enabled(bench_init_fn_t init_fn)
     ESP_LOGI(TAG, "micro_farr boot - tof bench");
     bench_tof_test();
     return true;
-#elif BENCH_CELL_CAL_TEST
-    (void)init_fn;
-    bench_cell_cal_test();
-    return true;
 #elif BENCH_TELEMETRY_TEST
     if (init_fn) init_fn();
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
     return true;
-#elif BENCH_SPEED_CAL_TEST
-    (void)init_fn;
-    ESP_LOGI(TAG, "micro_farr boot - speed calibration bench");
-    bench_speed_cal_test();
-    return true;
 #elif BENCH_MAZE_TEST
     if (init_fn) init_fn();
     navigation_task_start();
     return true;
-#elif BENCH_STRAIGHT_TEST
+#elif BENCH_TUNE_TEST
     if (init_fn) init_fn();
-    bench_straight_test();
-    return true;
-#elif BENCH_TURN_TEST
-    if (init_fn) init_fn();
-    bench_turn_test();
+    tuning_task_start();
     return true;
 #else
     (void)init_fn;

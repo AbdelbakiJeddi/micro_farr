@@ -51,6 +51,7 @@ static void publish_snapshot(void)
         .right_tof   = tof_distance_mm(TOF_RIGHT),
         .front_tof   = tof_distance_mm(TOF_FRONT),
         .yaw         = imu_get_yaw_deg(),
+        .yaw_rate_dps = imu_get_rate_dps(),
         .left_ticks  = encoder_get_total(&encoder_left) * ENCODER_LEFT_SIGN,
         .right_ticks = encoder_get_total(&encoder_right) * ENCODER_RIGHT_SIGN,
         .timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000ULL),

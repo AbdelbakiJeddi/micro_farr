@@ -2,6 +2,7 @@
 
 #define BENCH_OLED_TEST         0
 #define BENCH_TELEMETRY_TEST    0
+#define BENCH_TUNE_TEST         1
 
 #define BENCH_MOTOR_TEST        0
 #define BENCH_MOTOR_SPEED       30
@@ -16,26 +17,7 @@
 #define BENCH_TOF_TEST          0
 #define BENCH_TOF_PERIOD_MS     50
 
-#define BENCH_CELL_CAL_TEST      0
-#define BENCH_CELL_CAL_PERIOD_MS 200
-
-#define BENCH_MAZE_TEST          1   /* full maze solve; press a button to start */
-
-#define BENCH_SPEED_CAL_TEST     0   /* prints wheel speed vs duty to calibrate RUN_KFF */
-#define BENCH_SPEED_CAL_START    10
-#define BENCH_SPEED_CAL_MAX      40
-#define BENCH_SPEED_CAL_STEP     5
-#define BENCH_SPEED_CAL_SETTLE_MS  500
-#define BENCH_SPEED_CAL_MEASURE_MS 500
-
-#define BENCH_STRAIGHT_TEST      0
-#define BENCH_STRAIGHT_CELLS     2
-#define BENCH_STRAIGHT_REPEATS   1
-#define BENCH_STRAIGHT_DELAY_MS  500
-
-#define BENCH_TURN_TEST          0
-#define BENCH_TURN_REPEATS       4
-#define BENCH_TURN_DELAY_MS      800
+#define BENCH_MAZE_TEST          0   /* full maze solve; press a button to start */
 
 #define BUTTON_ACTIVE_LEVEL      0
 
@@ -106,35 +88,36 @@
 #define RUN_DECEL_TICKS_S2      (RUN_DECEL_MM_S2 * TICKS_PER_MM)
 #define RUN_MIN_TICKS_S         (RUN_MIN_MM_S * TICKS_PER_MM)
 
-#define RUN_MAX_DUTY            40.0f    /* straight-run duty cap (turns use TURN_MAX_DUTY) */
-#define RUN_START_DUTY          8.0f     /* integral pre-load to break static friction */
-#define RUN_KFF                 0.012f   /* duty % per tick/s of reference (calibrate!) */
-#define RUN_KP                  0.010f   /* duty % per tick/s of speed error */
-#define RUN_KI                  0.050f   /* duty % per tick of accumulated speed error */
+/* Per-wheel speed loop: each wheel runs its own feed-forward + PI on its own speed.
+ * Wheel references are v_body -/+ yaw_rate * WHEEL_BASE_MM / 2. Duty may go negative
+ * so the loop can brake actively. */
+#define RUN_MAX_DUTY            40.0f    /* per-wheel duty cap, both directions */
+#define RUN_START_DUTY          8.0f     /* per-wheel integral pre-load to break static friction */
+#define RUN_KFF                 0.012f   /* duty % per tick/s of wheel reference (calibrate!) */
+#define RUN_KP                  0.010f   /* duty % per tick/s of wheel speed error */
+#define RUN_KI                  0.050f   /* duty % per tick of accumulated wheel speed error */
 #define RUN_I_MAX_DUTY          15.0f
 
 #define SPEED_WINDOW_MS         20       /* min time between speed samples */
 #define SPEED_FILTER_ALPHA      0.5f
 
-#define YAW_KP                  0.5f
-#define YAW_MAX_CORR            12.0f
-#define YAW_STEER_SIGN          1
+/* Wheel contact-to-contact distance. MEASURE on the robot: it scales yaw rate into the
+ * left/right wheel speed difference. */
+#define WHEEL_BASE_MM           126.5f
 
-/* Straight-line steering source */
-#define STEER_MODE_YAW          0   /* IMU yaw hold only */
-#define STEER_MODE_TOF          1   /* side-ToF centering only */
-#define STEER_MODE_FUSED        2   /* IMU heading hold + ToF centering offset */
-#define STEER_MODE              STEER_MODE_FUSED
-#define TOF_WALL_MAX_MM         170    /* side reading below this counts as a wall */
-#define TOF_SIDE_TARGET_MM      85      /* (250 mm cell - 100 mm robot) / 2 */
-#define TOF_CENTER_KP           0.10f   /* duty per mm of lateral error */
-#define TOF_CENTER_MAX_CORR     14.0f
+/* Heading hold: yaw error -> body yaw-rate reference. Positive yaw rate follows
+ * TURN_YAW_SIGN (right wheel faster when TURN_YAW_SIGN = 1). */
+#define YAW_KP                  10.0f   /* deg/s of yaw-rate reference per deg of heading error */
+#define YAW_MAX_RATE_DPS        120.0f  /* cap on the steering yaw-rate reference */
+#define YAW_RATE_KP             0.3f    /* gyro feedback: extra deg/s per deg/s of rate error */
 
-/* Fused mode: ToF error -> heading offset (deg) fed to the IMU yaw loop.
- * TOF_YAW_GAIN * YAW_KP ~= TOF_CENTER_KP, so both modes respond with similar strength. */
-#define TOF_YAW_GAIN            0.2f    /* deg of heading offset per mm of lateral error */
-#define TOF_YAW_MAX_OFFSET_DEG  15.0f
-#define TOF_OFFSET_ALPHA        0.1f    /* low-pass per 5 ms loop (~50 ms time constant) */
+/* Straight-line steering: IMU heading hold + ToF wall-centering summed into one yaw-rate ref.
+ * YAW_KP handles heading error (deg -> deg/s).
+ * TOF_CENTER_KP handles lateral position error (mm -> deg/s).
+ * Both are clamped together by YAW_MAX_RATE_DPS. */
+#define TOF_WALL_MAX_MM         170     /* side reading below this counts as a wall */
+#define TOF_SIDE_TARGET_MM      85      /* target gap from each side wall (mm) */
+#define TOF_CENTER_KP           2.0f    /* deg/s per mm of lateral error */
 
 #define SEGMENT_TIMEOUT_MS      5000
 
@@ -150,7 +133,6 @@
 #define TURN_MIN_DUTY           12.0f
 #define TURN_MAX_DUTY           40.0f
 #define TURN_ACCEL_SLEW         0.8f
-#define TURN_COAST_MS           60
 #define TURN_SETTLE_MS          250
 #define TURN_TIMEOUT_MS         3000
 
