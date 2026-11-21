@@ -375,10 +375,23 @@ void ui_format_report(const move_report_t *r, char *buf, size_t len);
 
 ---
 
-### Task 10: Docs and repo cleanup
+### Task 10: Docs, architecture diagrams, repo cleanup
 
 **Files:**
-- Modify: `README.md` (status, architecture: 3 tasks + FSM + tuner pages; remove `progress_notes.md` link), `hardware.md` (add buttons SEL 21, INC 47, DEC 48, BOOT 0), `AGENTS.md` (host tests: `tests/host/run.sh`)
-- Add to `.gitignore`: `build_host/`
+- Create: `docs/architecture.md`, `docs/diagrams/hardware.drawio.svg`
+- Modify: `README.md`, `hardware.md` (add buttons SEL 21, INC 47, DEC 48, BOOT 0), `AGENTS.md` (host tests: `tests/host/run.sh`), `.gitignore` (`build_host/`)
 
-- [ ] **Step 1: Update docs.** **Step 2:** `tests/host/run.sh` PASS and `idf.py build` complete. **Step 3:** `git status` clean except intended. **Step 4: Commit** `docs: update README and hardware for new architecture`.
+**Diagrams** (Mermaid inline unless noted; every diagram has a legend; color = one meaning only):
+1. Hardware block — sensors / ESP32-S3 / TB6612 / motors, buses labeled (I2C 400 kHz, PCNT, PWM). `drawio.svg`, source kept editable.
+2. Task + IPC — core 0 / core 1 subgraphs; each task box shows `name · core · prio · rate`; queue, mailbox, event group drawn as their own nodes; arrows labeled with the type carried (`motion_cmd_t`, `sensor_snapshot_t`, `MOVE_DONE`); hardware ownership shown.
+3. Robot FSM — `stateDiagram-v2`: MENU / EXPLORE / SPEED_RUN / TUNER / FAULT.
+4. Control cascade — profile → steering → body (v, ω) → wheel PI → motors, feedback paths drawn.
+5. Sequence — one explore step: app → motion cmd → motion → MOVE_DONE → app.
+
+**Task table** beside diagram 2: task | core | prio | rate | owns | reads | writes.
+
+**README order:** one-line pitch + robot photo/GIF → diagram 2 (overview, readable in 30 s) → link to `docs/architecture.md` (diagrams 1–5 + task table) → **Design decisions** (short "why": per-wheel PI, unified cascade, 3 tasks not 4, gains in RAM, maze in NVS) → **Results** with real numbers (turn error, cell distance error, tuner photos) → build/flash/tune steps. Remove stale status and `progress_notes.md` link.
+
+- [ ] **Step 1:** write diagrams, `docs/architecture.md`, README, hardware/AGENTS/.gitignore updates.
+- [ ] **Step 2:** check Mermaid renders on GitHub (push branch or preview); `tests/host/run.sh` PASS; `idf.py build` complete.
+- [ ] **Step 3: Commit** `docs: architecture diagrams, README and hardware for new firmware`.
