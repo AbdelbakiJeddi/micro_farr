@@ -1,7 +1,7 @@
 # micro_farr firmware restructure — design
 
 Date: 2026-11-21
-Status: draft, awaiting approval
+Status: approved 2026-11-21
 
 ## 1. Intent
 
@@ -278,9 +278,14 @@ filled from `move_report_t` after a test. 7 visible rows, scrolling beyond that 
 ### 7.7 Maze, store, path
 
 - `maze.{h,c}` (existing) gains a `visited` bit per cell.
-- `maze_store.{h,c}`: NVS blob `{ magic, version, w, h, goal_x, goal_y, walls[], visited[] }`.
+- `maze_store.{h,c}`: NVS blob `{ magic, version, w, h, goal list, walls[], visited[] }`.
   Load rejects a blob whose magic/version/size/goal don't match `app_config.h`
   (→ "No maze"). Save overwrites.
+- **Goal = group of cells.** `app_config.h` lists them:
+  `#define MAZE_GOAL_CELLS { {7,7}, {7,8}, {8,7}, {8,8} }` (any count, ≥ 1).
+  `maze_flood()` seeds every goal cell with distance 0 (multi-source BFS); `maze_is_goal(x, y)`
+  replaces `at_goal()`. EXPLORE ends on entering any goal cell; the speed-run planner targets
+  the nearest goal cell. The NVS blob stores the goal list and load rejects a mismatch.
 - `path.{h,c}`: BFS from start to goal over visited cells with unknown walls treated as closed;
   compress the cell path into `{STRAIGHT n | TURN ±90 | TURN 180}` moves.
 
@@ -335,5 +340,4 @@ Deleted: `bench.{h,c}`, `tuning_task.*`, `tuning_params.*`, `tasks/telemetry_tas
 - Speed run stops between moves (pivots need a standstill).
 - Button roles table in 7.4.
 - Failed exploration saves nothing; FAULT keeps the RAM map.
-- Goal is the single cell `MAZE_GOAL_X/Y` from `app_config.h` (a 2x2 centre goal can be added
-  later by changing `at_goal()`).
+- Goal cells listed in `app_config.h` (operator: the goal can be a group of cells).
