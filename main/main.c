@@ -1,24 +1,28 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs_flash.h"
 
 #include "app_config.h"
 #include "app_ipc.h"
-#include "bench.h"
+#include "app_task.h"
+#include "button.h"
 #include "encoder.h"
 #include "imu.h"
 #include "motion_task.h"
 #include "motor.h"
-#include "nvs_flash.h"
+#include "oled.h"
 #include "params.h"
 #include "sensor_task.h"
-#include "telemetry_task.h"
 #include "tof.h"
+#include "ui.h"
 
-static void app_fatal(void) __attribute__((noreturn));
+static void app_fatal(const char *reason) __attribute__((noreturn));
 
-static void app_fatal(void)
+static void app_fatal(const char *reason)
 {
+    ESP_LOGE("app", "init failed: %s", reason);
+    ui_message("== INIT FAIL ==", reason, NULL);
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
@@ -38,24 +42,29 @@ static esp_err_t storage_init(void)
     return err;
 }
 
-static void app_init_and_start(void)
+void app_main(void)
 {
-    esp_log_level_set("*", ESP_LOG_NONE);
+    esp_log_level_set("*", ESP_LOG_WARN);
+    esp_log_level_set("app", ESP_LOG_INFO);
 
-    if (storage_init() != ESP_OK || app_ipc_init() != ESP_OK) {
-        app_fatal();
+    params_reset();
+
+    if (storage_init() != ESP_OK) {
+        app_fatal("NVS");
     }
+    if (app_ipc_init() != ESP_OK) {
+        app_fatal("IPC");
+    }
+    oled_init();   /* optional: the robot runs without a display */
+    button_init();
 
-    telemetry_task_start();
-
+    ui_message("== MICRO FARR ==", "calibrating", "keep still");
     if (imu_init() != ESP_OK || imu_calibrate(IMU_CALIB_SAMPLES) != ESP_OK) {
-        app_fatal();
+        app_fatal("IMU");
     }
-
     if (tof_init_all() != ESP_OK) {
-        app_fatal();
+        app_fatal("TOF");
     }
-
     encoder_init();
     motor_init();
     motor_enable(false);
@@ -64,15 +73,5 @@ static void app_init_and_start(void)
 
     sensor_task_start();
     motion_task_start();
-}
-
-void app_main(void)
-{
-    params_reset();
-
-    if (bench_run_if_enabled(app_init_and_start)) {
-        return;
-    }
-
-    app_init_and_start();
+    app_task_start();
 }

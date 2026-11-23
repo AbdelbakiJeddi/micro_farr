@@ -1,24 +1,5 @@
 #pragma once
 
-#define BENCH_OLED_TEST         0
-#define BENCH_TELEMETRY_TEST    0
-#define BENCH_TUNE_TEST         1
-
-#define BENCH_MOTOR_TEST        0
-#define BENCH_MOTOR_SPEED       30
-#define BENCH_MOTOR_TIME_MS     2000
-
-#define BENCH_ENCODER_TEST      0
-#define BENCH_ENCODER_PERIOD_MS 100
-
-#define BENCH_IMU_TEST          0
-#define BENCH_IMU_PERIOD_MS     100
-
-#define BENCH_TOF_TEST          0
-#define BENCH_TOF_PERIOD_MS     50
-
-#define BENCH_MAZE_TEST          0   /* full maze solve; press a button to start */
-
 #define BUTTON_ACTIVE_LEVEL      0
 
 #define ENCODER_HIGH_LIMIT      30000
@@ -56,16 +37,23 @@
 #define TOF_MEASURE_TIMEOUT_MS  100
 
 #define SENSOR_TASK_HZ          100
-#define TELEMETRY_TASK_HZ       20
-#define TELEMETRY_TASK_CORE     0
-#define TELEMETRY_TASK_PRIO     2
-#define TELEMETRY_TASK_STACK    4096
 #define SENSOR_TASK_CORE        1
 #define MOTION_TASK_CORE        1
 #define SENSOR_TASK_PRIO        9
 #define MOTION_TASK_PRIO        10
 #define SENSOR_TASK_STACK       4096
 #define MOTION_TASK_STACK       4096
+#define APP_TASK_CORE           0
+#define APP_TASK_PRIO           3
+#define APP_TASK_STACK          8192
+
+/* App UI: buttons polled, OLED redrawn at most every UI_REDRAW_MS while the robot moves
+ * (the OLED shares the I2C bus with the sensors) */
+#define UI_POLL_MS              50
+#define UI_REDRAW_MS            100
+#define UI_STOP_WAIT_MS         500     /* after DEC, wait this long for the move to end */
+#define START_DELAY_MS          500     /* after INC release, before the robot moves */
+#define TUNER_CELLS_MAX         16
 
 #define TICKS_PER_CELL          1400
 #define ENCODER_LEFT_SIGN       1
