@@ -25,6 +25,23 @@ static const char *state_text(motion_state_t state)
     }
 }
 
+static const char *const s_result_text[RESULT_COUNT] = {
+    [RESULT_NONE]        = "",
+    [RESULT_DONE]        = "DONE",
+    [RESULT_TIMEOUT]     = "TIMEOUT",
+    [RESULT_WALL_STOP]   = "WALL STOP",
+    [RESULT_SENSOR_LOST] = "SENSOR LOST",
+    [RESULT_STOPPED]     = "STOP",
+};
+
+static const char *result_text(const motion_status_t *status)
+{
+    if (status->state == MOTION_RUNNING || (unsigned)status->last.result >= RESULT_COUNT) {
+        return "";
+    }
+    return s_result_text[status->last.result];
+}
+
 static void format_tof(char *buf, size_t size, const char *label, int32_t mm)
 {
     if (mm >= 0) {
@@ -56,8 +73,8 @@ static void render_frame(bool have_status, const motion_status_t *status,
     }
     oled_text_line(2, line);
 
-    if (have_status && status->note[0] != '\0') {
-        oled_text_line(3, status->note);
+    if (have_status && result_text(status)[0] != '\0') {
+        oled_text_line(3, result_text(status));
     } else if (have_snapshot) {
         snprintf(line, sizeof(line), "L%ld R%ld",
                  (long)snapshot->left_ticks, (long)snapshot->right_ticks);

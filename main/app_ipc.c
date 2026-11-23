@@ -82,12 +82,12 @@ bool app_ipc_read_status(motion_status_t *status)
     return xQueuePeek(s_status_q, status, 0) == pdTRUE;
 }
 
-bool app_ipc_send_motion(motion_cmd_t cmd, TickType_t wait_ticks)
+bool app_ipc_send_motion(const motion_cmd_t *cmd, TickType_t wait_ticks)
 {
-    if (!s_motion_q) {
+    if (!s_motion_q || cmd == NULL) {
         return false;
     }
-    return xQueueSend(s_motion_q, &cmd, wait_ticks) == pdPASS;
+    return xQueueSend(s_motion_q, cmd, wait_ticks) == pdPASS;
 }
 
 bool app_ipc_recv_motion(motion_cmd_t *cmd, TickType_t wait_ticks)
@@ -121,4 +121,14 @@ EventBits_t app_ipc_wait_event(EventBits_t bits, bool clear_on_exit, TickType_t 
     return xEventGroupWaitBits(s_events, bits,
                                clear_on_exit ? pdTRUE : pdFALSE,
                                pdFALSE, wait_ticks);
+}
+
+void app_ipc_signal_sensor(void)
+{
+    app_ipc_set_event(APP_EVENT_SENSOR_NEW);
+}
+
+bool app_ipc_wait_sensor(TickType_t wait_ticks)
+{
+    return (app_ipc_wait_event(APP_EVENT_SENSOR_NEW, true, wait_ticks) & APP_EVENT_SENSOR_NEW) != 0;
 }

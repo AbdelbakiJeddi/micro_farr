@@ -7,10 +7,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include "app_ipc.h"
 #include "app_types.h"
 #include "button.h"
-#include "motion_control_task.h"
+#include "motion_client.h"
 #include "oled.h"
 #include "params.h"
 #include "telemetry_task.h"
@@ -82,24 +81,44 @@ static const param_entry_t s_dump[] = {
     ACTION_ROW("[DUMP]"),
 };
 
+static int s_cells = 1;
+
+static void dump_all(void);
+
+static void run_straight(void)
+{
+    motion_straight(1, PROFILE_EXPLORE);
+}
+
+static void run_turn(void)
+{
+    motion_turn(-90, PROFILE_EXPLORE);
+}
+
+static void run_speed(void)
+{
+    motion_straight(s_cells, PROFILE_EXPLORE);
+}
+
 typedef struct {
-    const char         *name;
+    const char          *name;
     const param_entry_t *entries;
     int                  count;
-    motion_cmd_t         run_cmd;
+    void               (*run)(void);   /* action row */
 } stage_def_t;
 
+#define STAGE(name, rows, run) { name, rows, (int)(sizeof(rows) / sizeof(rows[0])), run }
+
 static const stage_def_t s_stages[STAGE_COUNT] = {
-    { "STRAIGHT", s_straight, (int)(sizeof(s_straight) / sizeof(s_straight[0])), CMD_STRAIGHT_CELL },
-    { "TURN",     s_turn,     (int)(sizeof(s_turn)     / sizeof(s_turn[0])),     CMD_TURN_RIGHT    },
-    { "SPEED",    s_speed,    (int)(sizeof(s_speed)    / sizeof(s_speed[0])),    CMD_STRAIGHT_CELL },
-    { "DUMP",     s_dump,     (int)(sizeof(s_dump)     / sizeof(s_dump[0])),     CMD_STOP          },
+    STAGE("STRAIGHT", s_straight, run_straight),
+    STAGE("TURN",     s_turn,     run_turn),
+    STAGE("SPEED",    s_speed,    run_speed),
+    STAGE("DUMP",     s_dump,     dump_all),
 };
 
 static tuner_stage_t s_stage  = STAGE_STRAIGHT;
 static int           s_cursor = 0;
 static int           s_scroll = 0;
-static int           s_cells  = 1;
 
 static void clamp_scroll(void)
 {
@@ -193,23 +212,12 @@ static void dump_all(void)
     oled_flush();
 }
 
-static void run_stage_action(void)
-{
-    if (s_stage == STAGE_DUMP) {
-        dump_all();
-    } else if (s_stage == STAGE_SPEED) {
-        straight_cells((uint8_t)s_cells);
-    } else {
-        app_ipc_send_motion(s_stages[s_stage].run_cmd, pdMS_TO_TICKS(100));
-    }
-}
-
 static bool act_on_entry(const param_entry_t *e, bool increment)
 {
     int dir = increment ? +1 : -1;
 
     if (e->kind == ROW_ACTION) {
-        run_stage_action();
+        s_stages[s_stage].run();
         return false;
     }
     if (e->kind == ROW_CELLS) {

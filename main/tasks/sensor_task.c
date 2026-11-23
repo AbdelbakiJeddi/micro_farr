@@ -59,7 +59,9 @@ static void publish_snapshot(void)
 
     if (!app_ipc_publish_sensor(&snapshot)) {
         ESP_LOGW(TAG, "snapshot publish failed");
+        return;
     }
+    app_ipc_signal_sensor();
 }
 
 static void sensor_task(void *arg)

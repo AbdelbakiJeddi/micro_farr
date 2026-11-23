@@ -56,7 +56,6 @@
 #define TOF_MEASURE_TIMEOUT_MS  100
 
 #define SENSOR_TASK_HZ          100
-#define MOTION_TASK_HZ          200
 #define TELEMETRY_TASK_HZ       20
 #define TELEMETRY_TASK_CORE     0
 #define TELEMETRY_TASK_PRIO     2
@@ -123,6 +122,11 @@
 #define TOF_CENTER_KP           2.0f    /* deg/s per mm of lateral error */
 
 #define SEGMENT_TIMEOUT_MS      5000
+
+/* Motion runs once per sensor snapshot; no snapshot for this long during a move = fault */
+#define MOTION_SENSOR_TIMEOUT_MS 50
+#define MOTION_DT_MIN_S          0.001f  /* control step clamp, from snapshot timestamps */
+#define MOTION_DT_MAX_S          0.050f
 
 /* Front wall: emergency stop of a straight move when the front ToF reads below this */
 #define FRONT_STOP_MM           50

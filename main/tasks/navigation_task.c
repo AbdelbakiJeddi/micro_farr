@@ -8,7 +8,7 @@
 #include "app_ipc.h"
 #include "button.h"
 #include "maze.h"
-#include "motion_control_task.h"
+#include "motion_client.h"
 
 static const char *TAG = "nav";
 
@@ -45,17 +45,10 @@ static void record_walls(maze_t *m, int x, int y, maze_dir_t dir,
     maze_set_wall(m, x, y, maze_turn_dir(dir, 1), wall_seen(s->right_tof, TOF_WALL_MAX_MM));
 }
 
-static bool wait_motion_done(void)
-{
-    EventBits_t bits = app_ipc_wait_event(APP_EVENT_SEGMENT_DONE | APP_EVENT_FAULT, true,
-                                          pdMS_TO_TICKS(NAV_MOVE_WAIT_MS));
-    return (bits & APP_EVENT_SEGMENT_DONE) != 0;
-}
-
 static bool quarter_turn(bool left)
 {
-    esp_err_t err = left ? turn_left() : turn_right();
-    return err == ESP_OK && wait_motion_done();
+    esp_err_t err = motion_turn(left ? 90 : -90, PROFILE_EXPLORE);
+    return err == ESP_OK && motion_wait(pdMS_TO_TICKS(NAV_MOVE_WAIT_MS), NULL);
 }
 
 /* Rotate in place until the robot faces target. */
@@ -123,8 +116,8 @@ static int cells_travelled(int planned)
     motion_status_t st;
     int cells = planned;
 
-    if (app_ipc_read_status(&st)) {
-        cells = (st.progress_ticks + CELL_TICKS / 2) / CELL_TICKS;
+    if (motion_status(&st)) {
+        cells = (st.last.distance_ticks + CELL_TICKS / 2) / CELL_TICKS;
     }
     return cells < planned ? cells : planned;
 }
@@ -137,25 +130,25 @@ static bool run(nav_state_t *n)
     int planned = 1;   /* cells in the run so far */
     int decided = 0;   /* cells ahead whose walls have been decided */
 
-    if (straight_one_cell() != ESP_OK) {
+    if (motion_straight(1, PROFILE_EXPLORE) != ESP_OK) {
         return false;
     }
 
     while (1) {
-        EventBits_t bits = app_ipc_wait_event(APP_EVENT_SEGMENT_DONE | APP_EVENT_FAULT, true,
+        EventBits_t bits = app_ipc_wait_event(APP_EVENT_MOVE_DONE | APP_EVENT_MOVE_FAULT, true,
                                               pdMS_TO_TICKS(NAV_POLL_MS));
-        if (bits & APP_EVENT_FAULT) {
+        if (bits & APP_EVENT_MOVE_FAULT) {
             return false;
         }
-        if (bits & APP_EVENT_SEGMENT_DONE) {
+        if (bits & APP_EVENT_MOVE_DONE) {
             break;
         }
 
         motion_status_t st;
         int next = decided + 1;
-        if (next <= planned && app_ipc_read_status(&st) &&
+        if (next <= planned && motion_status(&st) &&
             st.progress_ticks >= decide_ticks(next)) {
-            if (decide_continue(n, next) && straight_extend_cell() == ESP_OK) {
+            if (decide_continue(n, next) && motion_extend(1) == ESP_OK) {
                 planned++;
             }
             decided = next;
@@ -252,7 +245,6 @@ static void navigation_task(void *arg)
             ESP_LOGI(TAG, "GOAL reached at (%d,%d)", nav.x, nav.y);
         } else {
             ESP_LOGE(TAG, "run failed at (%d,%d)", nav.x, nav.y);
-            app_ipc_set_event(APP_EVENT_FAULT);
         }
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
