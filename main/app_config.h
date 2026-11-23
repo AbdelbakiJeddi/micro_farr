@@ -127,7 +127,7 @@
 
 /* Front-wall distance stop: when the front ToF agrees with the encoder target within
  * FRONT_ALIGN_WIN_MM, the straight ends FRONT_ALIGN_MM from the wall. */
-#define FRONT_ALIGN_MM          40       /* tune me */
+#define FRONT_ALIGN_MM          85       /* tune me: front reading at cell centre (square robot ~ TOF_SIDE_TARGET_MM); must stay > FRONT_STOP_MM */
 #define FRONT_ALIGN_WIN_MM      60       /* tune me */
 
 /* Heading re-align: rate (1/s) at which the heading reference drifts toward the measured

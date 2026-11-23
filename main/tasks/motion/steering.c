@@ -59,6 +59,30 @@ float steer_rate_ref(steer_t *s, const sensor_snapshot_t *snap)
     return fminf(fmaxf(rate, -limit), limit);
 }
 
+void steer_realign(steer_t *s, const sensor_snapshot_t *snap, float dt)
+{
+    if (side_is_wall(snap->left_tof) && side_is_wall(snap->right_tof)) {
+        s->heading_ref -= params_get(P_REALIGN_RATE) * steer_heading_err(s, snap->yaw) * dt;
+    }
+}
+
+int32_t steer_front_remaining(int32_t enc_remaining_ticks, int32_t front_tof_mm)
+{
+    float tpm = params_ticks_per_mm();
+
+    if (front_tof_mm < 0) {
+        return enc_remaining_ticks;
+    }
+
+    float tof_mm = (float)front_tof_mm - params_get(P_FRONT_ALIGN_MM);
+    float enc_mm = (float)enc_remaining_ticks / tpm;
+
+    if (fabsf(tof_mm - enc_mm) > params_get(P_FRONT_ALIGN_WIN_MM)) {
+        return enc_remaining_ticks;
+    }
+    return (int32_t)(tof_mm * tpm);
+}
+
 /* Half the left/right wheel speed difference (ticks/s) that produces the yaw rate. */
 float steer_wheel_half_diff(float rate_dps)
 {

@@ -205,9 +205,12 @@ static uint32_t straight_timeout_ms(void)
 
 static void update_straight(const sensor_snapshot_t *snap, float dt)
 {
-    int32_t progress = ((snap->left_ticks - s_straight.start_left) +
-                        (snap->right_ticks - s_straight.start_right)) / 2;
-    float   rate_ref = steer_rate_ref(&s_steer, snap);
+    int32_t progress  = ((snap->left_ticks - s_straight.start_left) +
+                         (snap->right_ticks - s_straight.start_right)) / 2;
+    int32_t remaining = steer_front_remaining(s_straight.target_ticks - progress, snap->front_tof);
+
+    steer_realign(&s_steer, snap, dt);
+    float rate_ref = steer_rate_ref(&s_steer, snap);
 
     straight_report(snap, progress);
 
@@ -221,7 +224,7 @@ static void update_straight(const sensor_snapshot_t *snap, float dt)
         end_move(RESULT_WALL_STOP);
         return;
     }
-    if (progress >= s_straight.target_ticks) {
+    if (remaining <= 0) {
         ESP_LOGI(TAG, "segment done: progress=%ld", (long)progress);
         end_move(RESULT_DONE);
         return;
@@ -231,7 +234,7 @@ static void update_straight(const sensor_snapshot_t *snap, float dt)
     s_status.target_ticks   = s_straight.target_ticks;
     publish_status();
 
-    drive_wheels(next_speed_ref(s_straight.target_ticks - progress, dt),
+    drive_wheels(next_speed_ref(remaining, dt),
                  steer_wheel_half_diff(rate_ref), snap, dt);
 }
 

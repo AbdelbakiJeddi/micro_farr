@@ -23,7 +23,8 @@ static const char *TAG = "tuner";
 #define DISPLAY_ROWS    7   /* rows 1..7; row 0 is the stage header */
 
 typedef enum {
-    STAGE_STRAIGHT = 0,
+    STAGE_DISTANCE = 0,
+    STAGE_STRAIGHT,
     STAGE_TURN,
     STAGE_SPEED,
     STAGE_DUMP,
@@ -78,10 +79,19 @@ static void run_turn_180(void)
     motion_turn(180, PROFILE_EXPLORE);
 }
 
+static const param_entry_t s_distance[] = {
+    PARAM_ROW(P_TICKS_PER_CELL),
+    PARAM_ROW(P_FRONT_ALIGN_MM),
+    PARAM_ROW(P_FRONT_ALIGN_WIN_MM),
+    CELLS_ROW,
+    ACTION_ROW("[RUN]", run_speed),
+};
+
 static const param_entry_t s_straight[] = {
     PARAM_ROW(P_YAW_KP),
     PARAM_ROW(P_YAW_MAX_RATE_DPS),
     PARAM_ROW(P_TOF_CENTER_KP),
+    PARAM_ROW(P_REALIGN_RATE),
     PARAM_ROW(P_RUN_KFF),
     PARAM_ROW(P_RUN_KP),
     PARAM_ROW(P_RUN_KI),
@@ -120,13 +130,14 @@ typedef struct {
 #define STAGE(name, rows) { name, rows, (int)(sizeof(rows) / sizeof(rows[0])) }
 
 static const stage_def_t s_stages[STAGE_COUNT] = {
+    STAGE("DISTANCE", s_distance),
     STAGE("STRAIGHT", s_straight),
     STAGE("TURN",     s_turn),
     STAGE("SPEED",    s_speed),
     STAGE("DUMP",     s_dump),
 };
 
-static tuner_stage_t s_stage  = STAGE_STRAIGHT;
+static tuner_stage_t s_stage  = STAGE_DISTANCE;
 static int           s_cursor = 0;
 static int           s_scroll = 0;
 
