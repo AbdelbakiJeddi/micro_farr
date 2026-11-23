@@ -44,6 +44,14 @@
 | BIN2 | 40 | Right dir |
 | STBY | 41 | Enable |
 
+## Buttons (active low, internal pull-up)
+| Button | GPIO | Use |
+|--------|------|-----|
+| BOOT | 0 | Next tuner page; on DUMP: back to menu |
+| SEL | 21 | Next row |
+| INC | 47 | Enter / increase / start test |
+| DEC | 48 | Decrease / stop (emergency stop during a run) |
+
 ## Reserved GPIO
 - 33–37: octal PSRAM
 - 0, 3, 45, 46: strapping

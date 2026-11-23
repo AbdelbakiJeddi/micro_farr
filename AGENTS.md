@@ -12,4 +12,6 @@
 ## Build / verify
 - ESP-IDF v6.1. Environment: `source ~/.espressif/v6.1/esp-idf/export.sh`.
 - After each change run `idf.py build` and confirm success.
+- Host unit tests for the pure modules (params, profile, wheel, steering, maze, path, store):
+  `tests/host/run.sh` → `ALL HOST TESTS PASSED`. Pure modules include no ESP-IDF headers.
 - Target: ESP32-S3-WROOM-1-N16R8 (16 MB flash, 8 MB octal PSRAM).
