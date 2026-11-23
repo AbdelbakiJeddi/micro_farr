@@ -11,7 +11,7 @@
 #include "app_ipc.h"
 #include "app_types.h"
 #include "motor.h"
-#include "tuning_params.h"
+#include "params.h"
 
 static const char *TAG = "motion";
 
@@ -192,8 +192,8 @@ static float wheel_duty(wheel_ctrl_t *w, float v_ref, int32_t ticks, uint32_t no
 {
     float err = v_ref - speed_update(&w->est, ticks, now_ms);
 
-    w->i_term = clamp_float(w->i_term + g_run_ki * err * MOTION_DT_S, RUN_I_MAX_DUTY);
-    return g_run_kff * v_ref + g_run_kp * err + w->i_term;
+    w->i_term = clamp_float(w->i_term + params_get(P_RUN_KI) * err * MOTION_DT_S, RUN_I_MAX_DUTY);
+    return params_get(P_RUN_KFF) * v_ref + params_get(P_RUN_KP) * err + w->i_term;
 }
 
 static void begin_straight(const sensor_snapshot_t *snapshot)
@@ -371,7 +371,7 @@ static float steer_rate_ref(const sensor_snapshot_t *snapshot)
 {
     float yaw_err = wrap180(s_straight.yaw_ref - snapshot->yaw);
     float lat_err = tof_lateral_error(snapshot);
-    return clamp_float(g_yaw_kp * yaw_err + g_tof_center_kp * lat_err, g_yaw_max_rate_dps);
+    return clamp_float(params_get(P_YAW_KP) * yaw_err + params_get(P_TOF_CENTER_KP) * lat_err, params_get(P_YAW_MAX_RATE_DPS));
 }
 
 /* Half the left/right wheel speed difference (ticks/s) that produces the yaw rate,
@@ -387,10 +387,10 @@ static float wheel_half_diff(float rate_ref_dps, float rate_meas_dps)
  * falling to the creep floor. Extending the target moves the braking point further away. */
 static float next_speed_ref(int32_t remaining_ticks)
 {
-    float v_brake = fmaxf(sqrtf(2.0f * (g_run_decel_mm_s2 * TICKS_PER_MM) * (float)remaining_ticks),
+    float v_brake = fmaxf(sqrtf(2.0f * (params_get(P_EXP_DECEL) * TICKS_PER_MM) * (float)remaining_ticks),
                           RUN_MIN_TICKS_S);
-    float v_up    = s_straight.v_ref + (g_run_accel_mm_s2 * TICKS_PER_MM) * MOTION_DT_S;
-    float v       = fminf(fminf(v_up, g_run_cruise_mm_s * TICKS_PER_MM), v_brake);
+    float v_up    = s_straight.v_ref + (params_get(P_EXP_ACCEL) * TICKS_PER_MM) * MOTION_DT_S;
+    float v       = fminf(fminf(v_up, params_get(P_EXP_CRUISE) * TICKS_PER_MM), v_brake);
 
     s_straight.v_ref = v;
     return v;
@@ -399,7 +399,7 @@ static float next_speed_ref(int32_t remaining_ticks)
 /* Negative duty is allowed so a wheel loop can brake actively. */
 static int clamp_run_duty(float duty)
 {
-    duty = clamp_float(duty, g_run_max_duty);
+    duty = clamp_float(duty, params_get(P_RUN_MAX_DUTY));
     return (int)(duty >= 0.0f ? (duty + 0.5f) : (duty - 0.5f));
 }
 
@@ -461,7 +461,7 @@ static void turn_enter_settle(float abs_err, TickType_t now)
  * absorbs it on the next move. Returns true while settling. */
 static bool turn_handle_settle(float abs_err, TickType_t now)
 {
-    if (now - s_turn.settle_tick < pdMS_TO_TICKS((uint32_t)g_turn_settle_ms)) {
+    if (now - s_turn.settle_tick < pdMS_TO_TICKS((uint32_t)params_get(P_TURN_SETTLE_MS))) {
         return true;
     }
     if (abs_err <= TURN_TOL_DEG) {
@@ -477,8 +477,8 @@ static bool turn_handle_settle(float abs_err, TickType_t now)
 /* Duty magnitude for the remaining error, slewed both up and down. */
 static float turn_next_duty(float abs_err)
 {
-    float target = fminf(g_turn_ff_duty + g_turn_kp * abs_err, g_turn_max_duty);
-    float step   = clamp_float(target - s_turn.current_duty, g_turn_accel_slew);
+    float target = fminf(params_get(P_TURN_FF_DUTY) + params_get(P_TURN_KP) * abs_err, params_get(P_TURN_MAX_DUTY));
+    float step   = clamp_float(target - s_turn.current_duty, params_get(P_TURN_SLEW));
 
     s_turn.current_duty += step;
     return s_turn.current_duty;
@@ -514,8 +514,8 @@ static void update_turn(const sensor_snapshot_t *snapshot)
     float physical    = yaw_err * (float)TURN_YAW_SIGN;
     float signed_duty = physical >= 0.0f ? duty : -duty;
 
-    motor_set_speed(&motor_left,  clamp_duty(-signed_duty, TURN_MIN_DUTY, g_turn_max_duty));
-    motor_set_speed(&motor_right, clamp_duty(signed_duty, TURN_MIN_DUTY, g_turn_max_duty));
+    motor_set_speed(&motor_left,  clamp_duty(-signed_duty, TURN_MIN_DUTY, params_get(P_TURN_MAX_DUTY)));
+    motor_set_speed(&motor_right, clamp_duty(signed_duty, TURN_MIN_DUTY, params_get(P_TURN_MAX_DUTY)));
 }
 
 static void start_pending_motion(const sensor_snapshot_t *snapshot)

@@ -68,7 +68,8 @@
 #define SENSOR_TASK_STACK       4096
 #define MOTION_TASK_STACK       4096
 
-#define CELL_TICKS              1400
+#define TICKS_PER_CELL          1400
+#define CELL_TICKS              TICKS_PER_CELL  /* alias until all users read P_TICKS_PER_CELL */
 #define ENCODER_LEFT_SIGN       1
 #define ENCODER_RIGHT_SIGN      1
 
@@ -79,14 +80,16 @@
  * Speeds are given in mm/s and converted to encoder ticks with CELL_TICKS per CELL_MM. */
 #define CELL_MM                 250.0f
 #define TICKS_PER_MM            ((float)CELL_TICKS / CELL_MM)
-#define RUN_CRUISE_MM_S         450.0f
-#define RUN_ACCEL_MM_S2         2500.0f
-#define RUN_DECEL_MM_S2         3000.0f
 #define RUN_MIN_MM_S            40.0f    /* creep speed so a run always finishes */
-#define RUN_CRUISE_TICKS_S      (RUN_CRUISE_MM_S * TICKS_PER_MM)
-#define RUN_ACCEL_TICKS_S2      (RUN_ACCEL_MM_S2 * TICKS_PER_MM)
-#define RUN_DECEL_TICKS_S2      (RUN_DECEL_MM_S2 * TICKS_PER_MM)
 #define RUN_MIN_TICKS_S         (RUN_MIN_MM_S * TICKS_PER_MM)
+
+/* Speed profiles (trapezoid): EXPLORE for mapping runs, FAST for speed runs */
+#define EXP_CRUISE_MM_S         450.0f
+#define EXP_ACCEL_MM_S2         2500.0f
+#define EXP_DECEL_MM_S2         3000.0f
+#define FAST_CRUISE_MM_S        450.0f   /* tune me */
+#define FAST_ACCEL_MM_S2        2500.0f  /* tune me */
+#define FAST_DECEL_MM_S2        3000.0f  /* tune me */
 
 /* Per-wheel speed loop: each wheel runs its own feed-forward + PI on its own speed.
  * Wheel references are v_body -/+ yaw_rate * WHEEL_BASE_MM / 2. Duty may go negative
@@ -123,6 +126,15 @@
 
 /* Front wall: emergency stop of a straight move when the front ToF reads below this */
 #define FRONT_STOP_MM           50
+
+/* Front-wall distance stop: when the front ToF agrees with the encoder target within
+ * FRONT_ALIGN_WIN_MM, the straight ends FRONT_ALIGN_MM from the wall. */
+#define FRONT_ALIGN_MM          40       /* tune me */
+#define FRONT_ALIGN_WIN_MM      60       /* tune me */
+
+/* Heading re-align: rate (1/s) at which the heading reference drifts toward the measured
+ * yaw while both side walls are seen. 0 = off. */
+#define REALIGN_RATE            0.0f     /* tune me */
 
 /* Pivot turns (tuned on the robot, from nav_01) */
 #define TURN_TARGET_DEG         90.0f

@@ -9,6 +9,7 @@
 #include "imu.h"
 #include "motion_control_task.h"
 #include "motor.h"
+#include "params.h"
 #include "sensor_task.h"
 #include "telemetry_task.h"
 #include "tof.h"
@@ -52,6 +53,8 @@ static void app_init_and_start(void)
 
 void app_main(void)
 {
+    params_reset();
+
     if (bench_run_if_enabled(app_init_and_start)) {
         return;
     }

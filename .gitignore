@@ -3,3 +3,4 @@ sdkconfig
 sdkconfig.old
 .idf/
 managed_components/
+build_host/

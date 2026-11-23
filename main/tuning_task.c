@@ -1,5 +1,4 @@
 #include "tuning_task.h"
-#include "tuning_params.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -13,6 +12,7 @@
 #include "button.h"
 #include "motion_control_task.h"
 #include "oled.h"
+#include "params.h"
 #include "telemetry_task.h"
 
 static const char *TAG = "tuner";
@@ -31,44 +31,55 @@ typedef enum {
     STAGE_COUNT,
 } tuner_stage_t;
 
+typedef enum {
+    ROW_PARAM,
+    ROW_CELLS,
+    ROW_ACTION,
+} row_kind_t;
+
 typedef struct {
-    const char *name;
-    float      *value;
-    float       step;
+    row_kind_t  kind;
+    param_id_t  param;   /* ROW_PARAM */
+    const char *label;   /* ROW_CELLS / ROW_ACTION */
 } param_entry_t;
 
-#define RUN_ENTRY { "[RUN]", NULL, 0.0f }
+#define PARAM_ROW(id)    { ROW_PARAM, (id), NULL }
+#define CELLS_ROW        { ROW_CELLS, P_COUNT, "CELLS" }
+#define ACTION_ROW(name) { ROW_ACTION, P_COUNT, (name) }
+#define RUN_ENTRY        ACTION_ROW("[RUN]")
+
+#define CELLS_MAX 16
 
 static const param_entry_t s_straight[] = {
-    { "YAW_KP",  &g_yaw_kp,           1.0f   },
-    { "YAW_MAX", &g_yaw_max_rate_dps,  5.0f   },
-    { "TOF_KP",  &g_tof_center_kp,     0.1f   },
-    { "RUN_KFF", &g_run_kff,           0.001f },
-    { "RUN_KP",  &g_run_kp,            0.001f },
-    { "RUN_KI",  &g_run_ki,            0.005f },
+    PARAM_ROW(P_YAW_KP),
+    PARAM_ROW(P_YAW_MAX_RATE_DPS),
+    PARAM_ROW(P_TOF_CENTER_KP),
+    PARAM_ROW(P_RUN_KFF),
+    PARAM_ROW(P_RUN_KP),
+    PARAM_ROW(P_RUN_KI),
     RUN_ENTRY,
 };
 
 static const param_entry_t s_turn[] = {
-    { "TURN_KP",  &g_turn_kp,         0.05f  },
-    { "TURN_FF",  &g_turn_ff_duty,     0.5f   },
-    { "TURN_MAX", &g_turn_max_duty,    1.0f   },
-    { "SLEW",     &g_turn_accel_slew,  0.05f  },
-    { "SETTL_MS", &g_turn_settle_ms,  10.0f   },
+    PARAM_ROW(P_TURN_KP),
+    PARAM_ROW(P_TURN_FF_DUTY),
+    PARAM_ROW(P_TURN_MAX_DUTY),
+    PARAM_ROW(P_TURN_SLEW),
+    PARAM_ROW(P_TURN_SETTLE_MS),
     RUN_ENTRY,
 };
 
 static const param_entry_t s_speed[] = {
-    { "CELLS",   &g_run_cells,         1.0f   },
-    { "CRUISE",  &g_run_cruise_mm_s,  10.0f  },
-    { "ACCEL",   &g_run_accel_mm_s2, 100.0f  },
-    { "DECEL",   &g_run_decel_mm_s2, 100.0f  },
-    { "MAX_D",   &g_run_max_duty,      1.0f   },
+    CELLS_ROW,
+    PARAM_ROW(P_EXP_CRUISE),
+    PARAM_ROW(P_EXP_ACCEL),
+    PARAM_ROW(P_EXP_DECEL),
+    PARAM_ROW(P_RUN_MAX_DUTY),
     RUN_ENTRY,
 };
 
 static const param_entry_t s_dump[] = {
-    { "[DUMP]", NULL, 0.0f },
+    ACTION_ROW("[DUMP]"),
 };
 
 typedef struct {
@@ -88,6 +99,7 @@ static const stage_def_t s_stages[STAGE_COUNT] = {
 static tuner_stage_t s_stage  = STAGE_STRAIGHT;
 static int           s_cursor = 0;
 static int           s_scroll = 0;
+static int           s_cells  = 1;
 
 static void clamp_scroll(void)
 {
@@ -111,17 +123,17 @@ static void clamp_scroll(void)
     }
 }
 
+static const char *entry_label(const param_entry_t *e)
+{
+    return e->kind == ROW_PARAM ? params_info(e->param)->label : e->label;
+}
+
 static void format_value(char *buf, size_t len, const param_entry_t *e)
 {
-    float v = *e->value;
-    if (e->step >= 1.0f) {
-        snprintf(buf, len, "%.0f", v);
-    } else if (e->step >= 0.1f) {
-        snprintf(buf, len, "%.1f", v);
-    } else if (e->step >= 0.01f) {
-        snprintf(buf, len, "%.2f", v);
+    if (e->kind == ROW_PARAM) {
+        params_format_value(e->param, buf, len);
     } else {
-        snprintf(buf, len, "%.3f", v);
+        snprintf(buf, len, "%d", s_cells);
     }
 }
 
@@ -154,14 +166,14 @@ static void display_refresh(void)
         const param_entry_t *e   = &entries[idx];
         char                 buf[22];
 
-        if (e->value == NULL) {
+        if (e->kind == ROW_ACTION) {
             snprintf(buf, sizeof(buf), "%c %s",
-                     (idx == s_cursor) ? '>' : ' ', e->name);
+                     (idx == s_cursor) ? '>' : ' ', e->label);
         } else {
             char val[12];
             format_value(val, sizeof(val), e);
             snprintf(buf, sizeof(buf), "%c%-8.8s%s",
-                     (idx == s_cursor) ? '>' : ' ', e->name, val);
+                     (idx == s_cursor) ? '>' : ' ', entry_label(e), val);
         }
 
         oled_text_line((uint8_t)(i + 1), buf);
@@ -172,24 +184,7 @@ static void display_refresh(void)
 
 static void dump_all(void)
 {
-    printf("\n--- TUNED GAINS ---\n");
-    printf("#define YAW_KP           %.3ff\n", g_yaw_kp);
-    printf("#define YAW_MAX_RATE_DPS %.1ff\n", g_yaw_max_rate_dps);
-    printf("#define TOF_CENTER_KP    %.3ff\n", g_tof_center_kp);
-    printf("#define RUN_KFF          %.4ff\n", g_run_kff);
-    printf("#define RUN_KP           %.4ff\n", g_run_kp);
-    printf("#define RUN_KI           %.4ff\n", g_run_ki);
-    printf("#define TURN_KP          %.3ff\n", g_turn_kp);
-    printf("#define TURN_FF_DUTY     %.2ff\n", g_turn_ff_duty);
-    printf("#define TURN_MAX_DUTY    %.1ff\n", g_turn_max_duty);
-    printf("#define TURN_ACCEL_SLEW  %.3ff\n", g_turn_accel_slew);
-    printf("#define TURN_SETTLE_MS   %.0ff\n", g_turn_settle_ms);
-    printf("#define RUN_CRUISE_MM_S  %.1ff\n", g_run_cruise_mm_s);
-    printf("#define RUN_ACCEL_MM_S2  %.1ff\n", g_run_accel_mm_s2);
-    printf("#define RUN_DECEL_MM_S2  %.1ff\n", g_run_decel_mm_s2);
-    printf("#define RUN_MAX_DUTY     %.1ff\n", g_run_max_duty);
-    printf("-------------------\n");
-    fflush(stdout);
+    params_dump();
 
     oled_clear();
     oled_text_line(0, "== DUMP ==");
@@ -198,25 +193,32 @@ static void dump_all(void)
     oled_flush();
 }
 
+static void run_stage_action(void)
+{
+    if (s_stage == STAGE_DUMP) {
+        dump_all();
+    } else if (s_stage == STAGE_SPEED) {
+        straight_cells((uint8_t)s_cells);
+    } else {
+        app_ipc_send_motion(s_stages[s_stage].run_cmd, pdMS_TO_TICKS(100));
+    }
+}
+
 static bool act_on_entry(const param_entry_t *e, bool increment)
 {
-    if (e->value == NULL) {
-        if (s_stage == STAGE_DUMP) {
-            dump_all();
-        } else if (s_stage == STAGE_SPEED) {
-            uint8_t cells = (uint8_t)g_run_cells;
-            if (cells < 1) cells = 1;
-            straight_cells(cells);
-        } else {
-            app_ipc_send_motion(s_stages[s_stage].run_cmd, pdMS_TO_TICKS(100));
-        }
+    int dir = increment ? +1 : -1;
+
+    if (e->kind == ROW_ACTION) {
+        run_stage_action();
         return false;
     }
-    *e->value += increment ? e->step : -e->step;
-    if (e->value == &g_run_cells) {
-        if (*e->value < 1.0f) *e->value = 1.0f;
-        if (*e->value > 16.0f) *e->value = 16.0f;
+    if (e->kind == ROW_CELLS) {
+        s_cells += dir;
+        if (s_cells < 1) s_cells = 1;
+        if (s_cells > CELLS_MAX) s_cells = CELLS_MAX;
+        return true;
     }
+    params_step(e->param, dir);
     return true;
 }
 
