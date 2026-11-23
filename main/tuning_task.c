@@ -38,48 +38,16 @@ typedef enum {
 
 typedef struct {
     row_kind_t  kind;
-    param_id_t  param;   /* ROW_PARAM */
-    const char *label;   /* ROW_CELLS / ROW_ACTION */
+    param_id_t  param;       /* ROW_PARAM */
+    const char *label;       /* ROW_CELLS / ROW_ACTION */
+    void      (*run)(void);  /* ROW_ACTION */
 } param_entry_t;
 
-#define PARAM_ROW(id)    { ROW_PARAM, (id), NULL }
-#define CELLS_ROW        { ROW_CELLS, P_COUNT, "CELLS" }
-#define ACTION_ROW(name) { ROW_ACTION, P_COUNT, (name) }
-#define RUN_ENTRY        ACTION_ROW("[RUN]")
+#define PARAM_ROW(id)          { ROW_PARAM, (id), NULL, NULL }
+#define CELLS_ROW              { ROW_CELLS, P_COUNT, "CELLS", NULL }
+#define ACTION_ROW(name, fn)   { ROW_ACTION, P_COUNT, (name), (fn) }
 
 #define CELLS_MAX 16
-
-static const param_entry_t s_straight[] = {
-    PARAM_ROW(P_YAW_KP),
-    PARAM_ROW(P_YAW_MAX_RATE_DPS),
-    PARAM_ROW(P_TOF_CENTER_KP),
-    PARAM_ROW(P_RUN_KFF),
-    PARAM_ROW(P_RUN_KP),
-    PARAM_ROW(P_RUN_KI),
-    RUN_ENTRY,
-};
-
-static const param_entry_t s_turn[] = {
-    PARAM_ROW(P_TURN_KP),
-    PARAM_ROW(P_TURN_FF_DUTY),
-    PARAM_ROW(P_TURN_MAX_DUTY),
-    PARAM_ROW(P_TURN_SLEW),
-    PARAM_ROW(P_TURN_SETTLE_MS),
-    RUN_ENTRY,
-};
-
-static const param_entry_t s_speed[] = {
-    CELLS_ROW,
-    PARAM_ROW(P_EXP_CRUISE),
-    PARAM_ROW(P_EXP_ACCEL),
-    PARAM_ROW(P_EXP_DECEL),
-    PARAM_ROW(P_RUN_MAX_DUTY),
-    RUN_ENTRY,
-};
-
-static const param_entry_t s_dump[] = {
-    ACTION_ROW("[DUMP]"),
-};
 
 static int s_cells = 1;
 
@@ -90,30 +58,72 @@ static void run_straight(void)
     motion_straight(1, PROFILE_EXPLORE);
 }
 
-static void run_turn(void)
-{
-    motion_turn(-90, PROFILE_EXPLORE);
-}
-
 static void run_speed(void)
 {
     motion_straight(s_cells, PROFILE_EXPLORE);
 }
 
+static void run_turn_right(void)
+{
+    motion_turn(-90, PROFILE_EXPLORE);
+}
+
+static void run_turn_left(void)
+{
+    motion_turn(90, PROFILE_EXPLORE);
+}
+
+static void run_turn_180(void)
+{
+    motion_turn(180, PROFILE_EXPLORE);
+}
+
+static const param_entry_t s_straight[] = {
+    PARAM_ROW(P_YAW_KP),
+    PARAM_ROW(P_YAW_MAX_RATE_DPS),
+    PARAM_ROW(P_TOF_CENTER_KP),
+    PARAM_ROW(P_RUN_KFF),
+    PARAM_ROW(P_RUN_KP),
+    PARAM_ROW(P_RUN_KI),
+    ACTION_ROW("[RUN]", run_straight),
+};
+
+static const param_entry_t s_turn[] = {
+    PARAM_ROW(P_TURN_MAX_RATE),
+    PARAM_ROW(P_TURN_ACCEL),
+    PARAM_ROW(P_TURN_DECEL),
+    PARAM_ROW(P_TURN_SETTLE_MS),
+    ACTION_ROW("[RUN R]", run_turn_right),
+    ACTION_ROW("[RUN L]", run_turn_left),
+    ACTION_ROW("[RUN 180]", run_turn_180),
+};
+
+static const param_entry_t s_speed[] = {
+    CELLS_ROW,
+    PARAM_ROW(P_EXP_CRUISE),
+    PARAM_ROW(P_EXP_ACCEL),
+    PARAM_ROW(P_EXP_DECEL),
+    PARAM_ROW(P_RUN_MAX_DUTY),
+    ACTION_ROW("[RUN]", run_speed),
+};
+
+static const param_entry_t s_dump[] = {
+    ACTION_ROW("[DUMP]", dump_all),
+};
+
 typedef struct {
     const char          *name;
     const param_entry_t *entries;
     int                  count;
-    void               (*run)(void);   /* action row */
 } stage_def_t;
 
-#define STAGE(name, rows, run) { name, rows, (int)(sizeof(rows) / sizeof(rows[0])), run }
+#define STAGE(name, rows) { name, rows, (int)(sizeof(rows) / sizeof(rows[0])) }
 
 static const stage_def_t s_stages[STAGE_COUNT] = {
-    STAGE("STRAIGHT", s_straight, run_straight),
-    STAGE("TURN",     s_turn,     run_turn),
-    STAGE("SPEED",    s_speed,    run_speed),
-    STAGE("DUMP",     s_dump,     dump_all),
+    STAGE("STRAIGHT", s_straight),
+    STAGE("TURN",     s_turn),
+    STAGE("SPEED",    s_speed),
+    STAGE("DUMP",     s_dump),
 };
 
 static tuner_stage_t s_stage  = STAGE_STRAIGHT;
@@ -217,7 +227,7 @@ static bool act_on_entry(const param_entry_t *e, bool increment)
     int dir = increment ? +1 : -1;
 
     if (e->kind == ROW_ACTION) {
-        s_stages[s_stage].run();
+        e->run();
         return false;
     }
     if (e->kind == ROW_CELLS) {

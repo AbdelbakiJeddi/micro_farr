@@ -11,12 +11,12 @@ static float clamp_abs(float value, float limit)
     return fminf(fmaxf(value, -limit), limit);
 }
 
-void wheel_reset(wheel_ctrl_t *w, int32_t ticks, uint32_t now_ms)
+void wheel_reset(wheel_ctrl_t *w, int32_t ticks, uint32_t now_ms, float dir)
 {
     w->ref_ticks = ticks;
     w->ref_ms    = now_ms;
     w->v         = 0.0f;
-    w->i_term    = RUN_START_DUTY;
+    w->i_term    = dir >= 0.0f ? RUN_START_DUTY : -RUN_START_DUTY;
 }
 
 /* Wheel speed in ticks/s, measured over windows of at least SPEED_WINDOW_MS and filtered. */

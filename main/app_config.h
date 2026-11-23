@@ -71,8 +71,6 @@
 #define ENCODER_LEFT_SIGN       1
 #define ENCODER_RIGHT_SIGN      1
 
-#define MOTION_MIN_DUTY         15.0f
-#define MOTION_MAX_DUTY         24.0f
 
 /* Continuous straight running: closed-loop speed with a trapezoid profile.
  * Speeds are given in mm/s and converted to encoder ticks with TICKS_PER_CELL per CELL_MM. */
@@ -136,15 +134,13 @@
  * yaw while both side walls are seen. 0 = off. */
 #define REALIGN_RATE            0.0f     /* tune me */
 
-/* Pivot turns (tuned on the robot, from nav_01) */
-#define TURN_TARGET_DEG         90.0f
+/* Pivot turns: angle trapezoid (deg/s, deg/s^2) through the wheel speed loops */
 #define TURN_TOL_DEG            1.0f
 #define TURN_YAW_SIGN           1
-#define TURN_KP                 1.70f
-#define TURN_FF_DUTY            12.0f
-#define TURN_MIN_DUTY           12.0f
-#define TURN_MAX_DUTY           40.0f
-#define TURN_ACCEL_SLEW         0.8f
+#define TURN_MAX_RATE_DPS       360.0f   /* tune me */
+#define TURN_ACCEL_DPS2         3000.0f  /* tune me */
+#define TURN_DECEL_DPS2         3000.0f  /* tune me */
+#define TURN_MIN_RATE_DPS       20.0f    /* creep floor so a turn always finishes */
 #define TURN_SETTLE_MS          250
 #define TURN_TIMEOUT_MS         3000
 

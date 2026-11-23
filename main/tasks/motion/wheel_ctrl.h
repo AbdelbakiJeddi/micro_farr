@@ -11,7 +11,8 @@ typedef struct {
     float    i_term;     /* duty % */
 } wheel_ctrl_t;
 
-void  wheel_reset(wheel_ctrl_t *w, int32_t ticks, uint32_t now_ms);
+/* dir = +1 forward / -1 backward: sign of the static-friction pre-load of the integrator. */
+void  wheel_reset(wheel_ctrl_t *w, int32_t ticks, uint32_t now_ms, float dir);
 
 /* Duty % in [-P_RUN_MAX_DUTY, P_RUN_MAX_DUTY]; negative brakes actively. */
 float wheel_duty(wheel_ctrl_t *w, float v_ref, int32_t ticks, uint32_t now_ms, float dt);

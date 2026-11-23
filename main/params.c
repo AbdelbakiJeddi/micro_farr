@@ -26,10 +26,9 @@ static const param_info_t s_info[P_COUNT] = {
     PARAM(P_FAST_CRUISE,        "F_CRUISE", FAST_CRUISE_MM_S,   10.0f,   10.0f,   3000.0f,  0),
     PARAM(P_FAST_ACCEL,         "F_ACCEL",  FAST_ACCEL_MM_S2,   100.0f,  100.0f,  20000.0f, 0),
     PARAM(P_FAST_DECEL,         "F_DECEL",  FAST_DECEL_MM_S2,   100.0f,  100.0f,  20000.0f, 0),
-    PARAM(P_TURN_KP,            "TURN_KP",  TURN_KP,            0.05f,   0.0f,    10.0f,    2),
-    PARAM(P_TURN_FF_DUTY,       "TURN_FF",  TURN_FF_DUTY,       0.5f,    0.0f,    100.0f,   1),
-    PARAM(P_TURN_MAX_DUTY,      "TURN_MAX", TURN_MAX_DUTY,      1.0f,    0.0f,    100.0f,   0),
-    PARAM(P_TURN_SLEW,          "SLEW",     TURN_ACCEL_SLEW,    0.05f,   0.0f,    10.0f,    2),
+    PARAM(P_TURN_MAX_RATE,      "T_RATE",   TURN_MAX_RATE_DPS,  10.0f,   10.0f,   1500.0f,  0),
+    PARAM(P_TURN_ACCEL,         "T_ACCEL",  TURN_ACCEL_DPS2,    100.0f,  100.0f,  30000.0f, 0),
+    PARAM(P_TURN_DECEL,         "T_DECEL",  TURN_DECEL_DPS2,    100.0f,  100.0f,  30000.0f, 0),
     PARAM(P_TURN_SETTLE_MS,     "SETTL_MS", TURN_SETTLE_MS,     10.0f,   0.0f,    1000.0f,  0),
 };
 

@@ -47,7 +47,8 @@ typedef enum {
 typedef struct {
     turn_phase_t phase;
     float        angle_deg;  /* |commanded angle| */
-    float        current_duty;
+    float        half_deg;   /* half the commanded heading change: centre of the error window */
+    float        rate;       /* |yaw-rate reference| (deg/s) from the angle profile */
     uint32_t     settle_ms;
 } turn_state_t;
 
@@ -77,37 +78,6 @@ static motion_status_t s_status = { .state = MOTION_IDLE };
 static void publish_status(void)
 {
     app_ipc_publish_status(&s_status);
-}
-
-static float clamp_float(float value, float limit)
-{
-    if (value > limit) {
-        return limit;
-    }
-    if (value < -limit) {
-        return -limit;
-    }
-    return value;
-}
-
-static int clamp_duty(float duty, float min_duty, float max_duty)
-{
-    if (duty > max_duty) {
-        duty = max_duty;
-    }
-    if (duty < -max_duty) {
-        duty = -max_duty;
-    }
-
-    int out = (int)(duty >= 0.0f ? (duty + 0.5f) : (duty - 0.5f));
-
-    if (out > 0 && out < (int)min_duty) {
-        out = (int)min_duty;
-    }
-    if (out < 0 && out > -(int)min_duty) {
-        out = -(int)min_duty;
-    }
-    return out;
 }
 
 static void motors_brake(void)
@@ -201,8 +171,8 @@ static void begin_straight(const motion_cmd_t *cmd, const sensor_snapshot_t *sna
 {
     int cells = cmd->cells > 0 ? cmd->cells : 1;
 
-    wheel_reset(&s_wheel_left, snap->left_ticks, snap->timestamp_ms);
-    wheel_reset(&s_wheel_right, snap->right_ticks, snap->timestamp_ms);
+    wheel_reset(&s_wheel_left, snap->left_ticks, snap->timestamp_ms, 1.0f);
+    wheel_reset(&s_wheel_right, snap->right_ticks, snap->timestamp_ms, 1.0f);
 
     s_straight.start_left   = snap->left_ticks;
     s_straight.start_right  = snap->right_ticks;
@@ -267,30 +237,31 @@ static void update_straight(const sensor_snapshot_t *snap, float dt)
 
 /* ---- turn ---- */
 
+/* Pivot: the right wheel goes forward for a left (+) turn, the left wheel backward. */
 static void begin_turn(const motion_cmd_t *cmd, const sensor_snapshot_t *snap)
 {
-    (void)snap;
+    float dir = cmd->angle_deg >= 0 ? 1.0f : -1.0f;
 
     /* Turn relative to the carried heading reference, not to the current yaw, so the
      * residual error of one turn is not added to the next. */
     s_steer.heading_ref += (float)cmd->angle_deg * (float)TURN_YAW_SIGN;
 
-    s_turn.phase        = TURN_DRIVE;
-    s_turn.angle_deg    = fabsf((float)cmd->angle_deg);
-    s_turn.current_duty = TURN_MIN_DUTY;
+    wheel_reset(&s_wheel_left, snap->left_ticks, snap->timestamp_ms, -dir);
+    wheel_reset(&s_wheel_right, snap->right_ticks, snap->timestamp_ms, dir);
+
+    s_turn.phase     = TURN_DRIVE;
+    s_turn.angle_deg = fabsf((float)cmd->angle_deg);
+    s_turn.half_deg  = 0.5f * (float)cmd->angle_deg * (float)TURN_YAW_SIGN;
+    s_turn.rate      = 0.0f;
 
     s_status.target_ticks = (int32_t)s_turn.angle_deg;
 }
 
-/* Duty magnitude for the remaining error, slewed both up and down. */
-static float turn_next_duty(float abs_err)
+/* Heading error wrapped into a window centred on half the commanded change, so a 180 deg
+ * turn has one well-defined direction from its first sample. */
+static float turn_error(const sensor_snapshot_t *snap)
 {
-    float target = fminf(params_get(P_TURN_FF_DUTY) + params_get(P_TURN_KP) * abs_err,
-                         params_get(P_TURN_MAX_DUTY));
-    float step   = clamp_float(target - s_turn.current_duty, params_get(P_TURN_SLEW));
-
-    s_turn.current_duty += step;
-    return s_turn.current_duty;
+    return steer_heading_err(&s_steer, snap->yaw + s_turn.half_deg) + s_turn.half_deg;
 }
 
 static uint32_t turn_timeout_ms(void)
@@ -298,16 +269,28 @@ static uint32_t turn_timeout_ms(void)
     return TURN_TIMEOUT_MS * (uint32_t)ceilf(s_turn.angle_deg / 90.0f);
 }
 
-/* Pivot in place toward the heading reference using the gyro yaw. A residual error after
- * settling is not re-driven; the carried heading reference absorbs it on the next move. */
+/* Yaw-rate reference from the angle trapezoid on the remaining angle. */
+static float turn_rate_ref(float err, float dt)
+{
+    profile_limits_t lim = {
+        .v_max = params_get(P_TURN_MAX_RATE),
+        .accel = params_get(P_TURN_ACCEL),
+        .decel = params_get(P_TURN_DECEL),
+        .v_min = TURN_MIN_RATE_DPS,
+    };
+
+    s_turn.rate = profile_next(s_turn.rate, fabsf(err), dt, &lim);
+    return err >= 0.0f ? s_turn.rate : -s_turn.rate;
+}
+
+/* Pivot in place (v = 0) through the wheel speed loops. A residual error after settling
+ * is not re-driven; the carried heading reference absorbs it on the next move. */
 static void update_turn(const sensor_snapshot_t *snap, float dt)
 {
-    (void)dt;
-    uint32_t now     = snap->timestamp_ms;
-    float    yaw_err = steer_heading_err(&s_steer, snap->yaw);
-    float    abs_err = fabsf(yaw_err);
+    uint32_t now = snap->timestamp_ms;
+    float    err = turn_error(snap);
 
-    s_report.heading_err_deg = yaw_err;
+    s_report.heading_err_deg = err;
 
     if (now - s_move_start_ms > turn_timeout_ms()) {
         ESP_LOGE(TAG, "turn timeout");
@@ -317,30 +300,24 @@ static void update_turn(const sensor_snapshot_t *snap, float dt)
 
     if (s_turn.phase == TURN_SETTLE) {
         if (now - s_turn.settle_ms >= (uint32_t)params_get(P_TURN_SETTLE_MS)) {
-            ESP_LOGI(TAG, "turn done: err=%.2f", yaw_err);
+            ESP_LOGI(TAG, "turn done: err=%.2f", err);
             s_status.progress_ticks = (int32_t)s_turn.angle_deg;
             end_move(RESULT_DONE);
         }
         return;
     }
 
-    s_status.progress_ticks = (int32_t)(s_turn.angle_deg - abs_err);
+    s_status.progress_ticks = (int32_t)(s_turn.angle_deg - fabsf(err));
     publish_status();
 
-    if (abs_err <= TURN_TOL_DEG) {
+    if (fabsf(err) <= TURN_TOL_DEG) {
         motors_brake();
         s_turn.phase     = TURN_SETTLE;
         s_turn.settle_ms = now;
         return;
     }
 
-    float duty        = turn_next_duty(abs_err);
-    float physical    = yaw_err * (float)TURN_YAW_SIGN;
-    float signed_duty = physical >= 0.0f ? duty : -duty;
-    float max_duty    = params_get(P_TURN_MAX_DUTY);
-
-    motor_set_speed(&motor_left,  clamp_duty(-signed_duty, TURN_MIN_DUTY, max_duty));
-    motor_set_speed(&motor_right, clamp_duty(signed_duty, TURN_MIN_DUTY, max_duty));
+    drive_wheels(0.0f, steer_wheel_half_diff(turn_rate_ref(err, dt)), snap, dt);
 }
 
 static const move_ops_t s_straight_ops = { begin_straight, update_straight };
