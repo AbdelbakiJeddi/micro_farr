@@ -36,5 +36,10 @@ void ui_wait_any(void);
 /* Call while a move runs: DEC sends motion_stop() and returns false. */
 bool ui_run_guard(void);
 
+/* Wait for the running move to end, calling on_poll(arg) every UI_MOVE_POLL_MS (NULL = none).
+ * DEC stops the robot; if the stop is not confirmed within UI_STOP_WAIT_MS the result is
+ * RESULT_STOPPED. Fills *out; returns true when the move ended normally. */
+bool ui_wait_move(void (*on_poll)(void *arg), void *arg, move_report_t *out);
+
 const char *ui_result_name(move_result_t result);
 void        ui_format_report(const move_report_t *r, char *buf, size_t len);

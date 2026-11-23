@@ -67,34 +67,21 @@ static void record_walls(maze_t *m, int x, int y, maze_dir_t dir,
     maze_set_wall(m, x, y, maze_turn_dir(dir, 1), wall_seen(s->right_tof, TOF_WALL_MAX_MM));
 }
 
-/* One poll while a move runs. Returns 1 = move done, -1 = failed (reason set), 0 = running.
- * DEC stops the robot. */
-static int poll_move(explore_t *e)
+static void on_move_poll(void *arg)
+{
+    draw_status((explore_t *)arg);
+}
+
+/* Wait for the move to end; DEC stops it. The failure reason is the move result. */
+static bool wait_move(explore_t *e, void (*on_poll)(void *arg), void *arg)
 {
     move_report_t r;
 
-    if (!ui_run_guard()) {
-        e->fail = "STOPPED";
-        return -1;
+    if (ui_wait_move(on_poll, arg, &r)) {
+        return true;
     }
-    if (motion_wait(pdMS_TO_TICKS(NAV_POLL_MS), &r)) {
-        return 1;
-    }
-    if (r.result != RESULT_NONE) {
-        e->fail = (r.result == RESULT_STOPPED) ? "STOPPED" : "MOVE FAULT";
-        return -1;
-    }
-    draw_status(e);
-    return 0;
-}
-
-static bool wait_move(explore_t *e)
-{
-    int state;
-
-    while ((state = poll_move(e)) == 0) {
-    }
-    return state > 0;
+    e->fail = ui_result_name(r.result);
+    return false;
 }
 
 /* Rotate in place until the robot faces target: one pivot of -90, 180 or +90. */
@@ -108,7 +95,7 @@ static bool face(explore_t *e, maze_dir_t target)
             e->fail = "MOVE FAULT";
             return false;
         }
-        if (!wait_move(e)) {
+        if (!wait_move(e, on_move_poll, e)) {
             return false;
         }
     }
@@ -168,18 +155,27 @@ static int cells_travelled(int planned)
     return cells < planned ? cells : planned;
 }
 
-/* Extend the run when the progress reaches the decide point of the next cell ahead. */
-static void decide_ahead(explore_t *e, int *planned, int *decided)
-{
-    motion_status_t st;
-    int next = *decided + 1;
+typedef struct {
+    explore_t *e;
+    int        planned;   /* cells in the run so far */
+    int        decided;   /* cells ahead whose walls have been decided */
+} run_t;
 
-    if (next <= *planned && motion_status(&st) && st.progress_ticks >= decide_ticks(next)) {
-        if (decide_continue(e, next) && motion_extend(1) == ESP_OK) {
-            (*planned)++;
+/* While running: extend the run when the progress reaches the decide point of the next
+ * cell ahead. */
+static void on_run_poll(void *arg)
+{
+    run_t          *run = arg;
+    motion_status_t st;
+    int             next = run->decided + 1;
+
+    if (next <= run->planned && motion_status(&st) && st.progress_ticks >= decide_ticks(next)) {
+        if (decide_continue(run->e, next) && motion_extend(1) == ESP_OK) {
+            run->planned++;
         }
-        *decided = next;
+        run->decided = next;
     }
+    draw_status(run->e);
 }
 
 /* Drive straight from the centre of this cell. Keeps extending the run, without
@@ -187,22 +183,17 @@ static void decide_ahead(explore_t *e, int *planned, int *decided)
  * first cell where the path turns (or at the goal). Updates and marks the robot's cells. */
 static bool run(explore_t *e)
 {
-    int planned = 1;   /* cells in the run so far */
-    int decided = 0;   /* cells ahead whose walls have been decided */
-    int state;
+    run_t r = { .e = e, .planned = 1, .decided = 0 };
 
     if (motion_straight(1, PROFILE_EXPLORE) != ESP_OK) {
         e->fail = "MOVE FAULT";
         return false;
     }
-    while ((state = poll_move(e)) == 0) {
-        decide_ahead(e, &planned, &decided);
-    }
-    if (state < 0) {
+    if (!wait_move(e, on_run_poll, &r)) {
         return false;
     }
 
-    int cells = cells_travelled(planned);
+    int cells = cells_travelled(r.planned);
     for (int i = 0; i < cells; i++) {
         maze_step(e->dir, &e->x, &e->y);
         maze_mark_visited(e->maze, e->x, e->y);

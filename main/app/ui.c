@@ -126,6 +126,33 @@ bool ui_run_guard(void)
     return true;
 }
 
+bool ui_wait_move(void (*on_poll)(void *arg), void *arg, move_report_t *out)
+{
+    TickType_t stop_tick = 0;
+    bool       stopping  = false;
+
+    while (1) {
+        if (!stopping && !ui_run_guard()) {
+            stopping  = true;
+            stop_tick = xTaskGetTickCount();
+        }
+        if (motion_wait(pdMS_TO_TICKS(UI_MOVE_POLL_MS), out)) {
+            return true;
+        }
+        if (out->result != RESULT_NONE) {
+            return false;
+        }
+        if (stopping) {
+            if (xTaskGetTickCount() - stop_tick > pdMS_TO_TICKS(UI_STOP_WAIT_MS)) {
+                out->result = RESULT_STOPPED;   /* nothing was running */
+                return false;
+            }
+        } else if (on_poll != NULL) {
+            on_poll(arg);
+        }
+    }
+}
+
 const char *ui_result_name(move_result_t result)
 {
     return ((unsigned)result < RESULT_COUNT) ? s_result_name[result] : "?";

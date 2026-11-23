@@ -25,5 +25,6 @@ typedef app_state_id_t (*state_run_fn)(app_ctx_t *ctx);
 
 app_state_id_t state_menu_run(app_ctx_t *ctx);
 app_state_id_t state_explore_run(app_ctx_t *ctx);
+app_state_id_t state_speed_run_run(app_ctx_t *ctx);
 app_state_id_t state_tuner_run(app_ctx_t *ctx);
 app_state_id_t state_fault_run(app_ctx_t *ctx);

@@ -51,7 +51,9 @@
  * (the OLED shares the I2C bus with the sensors) */
 #define UI_POLL_MS              50
 #define UI_REDRAW_MS            100
+#define UI_MOVE_POLL_MS         10      /* while a move runs: DEC, progress, explore decide-ahead */
 #define UI_STOP_WAIT_MS         500     /* after DEC, wait this long for the move to end */
+#define PATH_MAX_MOVES          64      /* speed-run move list */
 #define START_DELAY_MS          500     /* after INC release, before the robot moves */
 #define TUNER_CELLS_MAX         16
 
@@ -152,5 +154,4 @@
  * ~0.8 cell (200 mm) ahead, so the "wall" limit sits halfway between 200 mm and 450 mm. */
 #define NAV_DECIDE_FRAC         0.7f
 #define NAV_RUN_FRONT_WALL_MM   325
-#define NAV_POLL_MS             10
 #define NAV_MAX_STEPS           60

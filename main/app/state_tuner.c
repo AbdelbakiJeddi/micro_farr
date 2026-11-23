@@ -249,52 +249,37 @@ static void draw(const tuner_page_t *p, int cursor)
     ui_draw_list(title, rows, row_count(p), cursor, s_result);
 }
 
-static void draw_progress(const tuner_page_t *p, int cursor)
+typedef struct {
+    const tuner_page_t *page;
+    int                 cursor;
+    TickType_t          last_draw;
+} progress_t;
+
+/* While a test runs: progress on the result line, at most every UI_REDRAW_MS. */
+static void on_test_poll(void *arg)
 {
+    progress_t     *pr  = arg;
+    TickType_t      now = xTaskGetTickCount();
     motion_status_t st;
 
-    if (motion_status(&st)) {
-        snprintf(s_result, sizeof(s_result), "RUN %ld/%ld", (long)st.progress_ticks,
-                 (long)st.target_ticks);
+    if (now - pr->last_draw < pdMS_TO_TICKS(UI_REDRAW_MS) || !motion_status(&st)) {
+        return;
     }
-    draw(p, cursor);
-}
-
-/* Wait for the test to end; DEC stops it. Redraws progress at ~1/UI_REDRAW_MS. */
-static void wait_test(const tuner_page_t *p, int cursor, move_report_t *r)
-{
-    TickType_t last_draw = xTaskGetTickCount();
-    TickType_t stop_tick = 0;
-    bool       stopping  = false;
-
-    while (1) {
-        if (!stopping && !ui_run_guard()) {
-            stopping  = true;
-            stop_tick = xTaskGetTickCount();
-        }
-        if (motion_wait(pdMS_TO_TICKS(UI_POLL_MS), r) || r->result != RESULT_NONE) {
-            return;
-        }
-        TickType_t now = xTaskGetTickCount();
-        if (stopping && now - stop_tick > pdMS_TO_TICKS(UI_STOP_WAIT_MS)) {
-            r->result = RESULT_STOPPED;   /* nothing was running */
-            return;
-        }
-        if (now - last_draw >= pdMS_TO_TICKS(UI_REDRAW_MS)) {
-            draw_progress(p, cursor);
-            last_draw = now;
-        }
-    }
+    pr->last_draw = now;
+    snprintf(s_result, sizeof(s_result), "RUN %ld/%ld", (long)st.progress_ticks,
+             (long)st.target_ticks);
+    draw(pr->page, pr->cursor);
 }
 
 static void run_test(const tuner_page_t *p, const tuner_action_t *a, int cursor)
 {
     move_report_t r;
+    progress_t    pr = { .page = p, .cursor = cursor, .last_draw = xTaskGetTickCount() };
 
     if (!a->run(s_cells)) {
         return;
     }
-    wait_test(p, cursor, &r);
+    ui_wait_move(on_test_poll, &pr, &r);
     if (r.result == RESULT_DONE) {
         p->format(&r, s_result, sizeof(s_result));
     } else {
