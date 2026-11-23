@@ -32,3 +32,6 @@ const param_info_t *params_info(param_id_t id);
 int                 params_format_value(param_id_t id, char *buf, size_t len);
 int                 params_format_define(param_id_t id, char *buf, size_t len);
 void                params_dump(void);
+
+/* Encoder ticks per mm from the tuned TICKS_PER_CELL and the fixed CELL_MM. */
+float               params_ticks_per_mm(void);

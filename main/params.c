@@ -89,3 +89,8 @@ void params_dump(void)
     printf("--------------------\n");
     fflush(stdout);
 }
+
+float params_ticks_per_mm(void)
+{
+    return s_value[P_TICKS_PER_CELL] / CELL_MM;
+}

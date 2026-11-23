@@ -68,7 +68,6 @@
 #define MOTION_TASK_STACK       4096
 
 #define TICKS_PER_CELL          1400
-#define CELL_TICKS              TICKS_PER_CELL  /* alias until all users read P_TICKS_PER_CELL */
 #define ENCODER_LEFT_SIGN       1
 #define ENCODER_RIGHT_SIGN      1
 
@@ -76,11 +75,9 @@
 #define MOTION_MAX_DUTY         24.0f
 
 /* Continuous straight running: closed-loop speed with a trapezoid profile.
- * Speeds are given in mm/s and converted to encoder ticks with CELL_TICKS per CELL_MM. */
+ * Speeds are given in mm/s and converted to encoder ticks with TICKS_PER_CELL per CELL_MM. */
 #define CELL_MM                 250.0f
-#define TICKS_PER_MM            ((float)CELL_TICKS / CELL_MM)
 #define RUN_MIN_MM_S            40.0f    /* creep speed so a run always finishes */
-#define RUN_MIN_TICKS_S         (RUN_MIN_MM_S * TICKS_PER_MM)
 
 /* Speed profiles (trapezoid): EXPLORE for mapping runs, FAST for speed runs */
 #define EXP_CRUISE_MM_S         450.0f
@@ -111,7 +108,6 @@
  * TURN_YAW_SIGN (right wheel faster when TURN_YAW_SIGN = 1). */
 #define YAW_KP                  10.0f   /* deg/s of yaw-rate reference per deg of heading error */
 #define YAW_MAX_RATE_DPS        120.0f  /* cap on the steering yaw-rate reference */
-#define YAW_RATE_KP             0.3f    /* gyro feedback: extra deg/s per deg/s of rate error */
 
 /* Straight-line steering: IMU heading hold + ToF wall-centering summed into one yaw-rate ref.
  * YAW_KP handles heading error (deg -> deg/s).

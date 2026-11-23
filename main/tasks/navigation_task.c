@@ -9,6 +9,7 @@
 #include "button.h"
 #include "maze.h"
 #include "motion_client.h"
+#include "params.h"
 
 static const char *TAG = "nav";
 
@@ -84,7 +85,7 @@ static void cell_ahead(const nav_state_t *n, int k, int *x, int *y)
 /* Ticks of run progress at which the walls of the k-th cell ahead are read and decided. */
 static int32_t decide_ticks(int k)
 {
-    return (int32_t)(((float)(k - 1) + NAV_DECIDE_FRAC) * (float)CELL_TICKS);
+    return (int32_t)(((float)(k - 1) + NAV_DECIDE_FRAC) * params_get(P_TICKS_PER_CELL));
 }
 
 /* While moving: read the walls of the k-th cell ahead and decide whether to carry on
@@ -117,7 +118,8 @@ static int cells_travelled(int planned)
     int cells = planned;
 
     if (motion_status(&st)) {
-        cells = (st.last.distance_ticks + CELL_TICKS / 2) / CELL_TICKS;
+        int32_t cell = (int32_t)params_get(P_TICKS_PER_CELL);
+        cells = (st.last.distance_ticks + cell / 2) / cell;
     }
     return cells < planned ? cells : planned;
 }

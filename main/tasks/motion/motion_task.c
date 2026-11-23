@@ -1,4 +1,4 @@
-#include "motion_control_task.h"
+#include "motion_task.h"
 
 #include <math.h>
 #include <string.h>
@@ -10,12 +10,13 @@
 #include "app_config.h"
 #include "app_ipc.h"
 #include "app_types.h"
+#include "motion_profile.h"
 #include "motor.h"
 #include "params.h"
+#include "steering.h"
+#include "wheel_ctrl.h"
 
 static const char *TAG = "motion";
-
-#define DEG_TO_RAD 0.017453293f
 
 /* One kind of move: started from a command on a fresh snapshot, then stepped once per
  * snapshot until it calls end_move(). */
@@ -29,18 +30,6 @@ typedef void (*cmd_handler_t)(const motion_cmd_t *cmd);
 typedef struct {
     param_id_t cruise, accel, decel;
 } profile_params_t;
-
-typedef struct {
-    int32_t  ref_ticks;      /* wheel ticks at the last speed sample */
-    uint32_t ref_ms;
-    float    v;              /* filtered wheel speed (ticks/s) */
-} speed_est_t;
-
-/* One wheel's speed loop: its own speed estimate and its own integral. */
-typedef struct {
-    speed_est_t est;
-    float       i_term;      /* duty % */
-} wheel_ctrl_t;
 
 typedef struct {
     int32_t         start_left;
@@ -75,13 +64,11 @@ static straight_state_t s_straight;
 static turn_state_t     s_turn;
 static wheel_ctrl_t     s_wheel_left;
 static wheel_ctrl_t     s_wheel_right;
+static steer_t          s_steer;          /* heading reference carried across moves */
 static move_report_t    s_report;
 static uint32_t         s_move_start_ms;
 static uint32_t         s_last_ms;        /* timestamp of the last snapshot used */
 
-/* Absolute heading the robot should be facing, carried from move to move so that
- * small turn errors do not accumulate. */
-static float    s_heading_ref;
 static bool     s_heading_valid;
 static uint32_t s_last_end_ms;
 
@@ -90,17 +77,6 @@ static motion_status_t s_status = { .state = MOTION_IDLE };
 static void publish_status(void)
 {
     app_ipc_publish_status(&s_status);
-}
-
-static float wrap180(float deg)
-{
-    while (deg > 180.0f) {
-        deg -= 360.0f;
-    }
-    while (deg < -180.0f) {
-        deg += 360.0f;
-    }
-    return deg;
 }
 
 static float clamp_float(float value, float limit)
@@ -144,8 +120,8 @@ static void motors_brake(void)
 static void sync_heading_ref(const sensor_snapshot_t *snap)
 {
     if (!s_heading_valid || snap->timestamp_ms - s_last_end_ms > HEADING_REF_TIMEOUT_MS) {
-        s_heading_ref   = snap->yaw;
-        s_heading_valid = true;
+        s_steer.heading_ref = snap->yaw;
+        s_heading_valid     = true;
     }
 }
 
@@ -183,103 +159,42 @@ static void end_move(move_result_t result)
     app_ipc_set_event(normal ? APP_EVENT_MOVE_DONE : APP_EVENT_MOVE_FAULT);
 }
 
-/* ---- wheel speed loops ---- */
+/* ---- wheels ---- */
 
-static void wheel_reset(wheel_ctrl_t *w, int32_t ticks, uint32_t now_ms)
+static int round_duty(float duty)
 {
-    w->est.ref_ticks = ticks;
-    w->est.ref_ms    = now_ms;
-    w->est.v         = 0.0f;
-    w->i_term        = RUN_START_DUTY;
-}
-
-/* Wheel speed in ticks/s, measured over windows of at least SPEED_WINDOW_MS and filtered. */
-static float speed_update(speed_est_t *est, int32_t ticks, uint32_t now_ms)
-{
-    uint32_t dt_ms = now_ms - est->ref_ms;
-
-    if (dt_ms >= SPEED_WINDOW_MS) {
-        float inst = (float)(ticks - est->ref_ticks) * 1000.0f / (float)dt_ms;
-
-        est->v += SPEED_FILTER_ALPHA * (inst - est->v);
-        est->ref_ticks = ticks;
-        est->ref_ms    = now_ms;
-    }
-    return est->v;
-}
-
-/* Feed-forward + PI on one wheel's speed; returns duty in percent. */
-static float wheel_duty(wheel_ctrl_t *w, float v_ref, int32_t ticks, uint32_t now_ms, float dt)
-{
-    float err = v_ref - speed_update(&w->est, ticks, now_ms);
-
-    w->i_term = clamp_float(w->i_term + params_get(P_RUN_KI) * err * dt, RUN_I_MAX_DUTY);
-    return params_get(P_RUN_KFF) * v_ref + params_get(P_RUN_KP) * err + w->i_term;
-}
-
-/* Negative duty is allowed so a wheel loop can brake actively. */
-static int clamp_run_duty(float duty)
-{
-    duty = clamp_float(duty, params_get(P_RUN_MAX_DUTY));
     return (int)(duty >= 0.0f ? (duty + 0.5f) : (duty - 0.5f));
 }
 
-/* ---- steering ---- */
-
-static bool side_is_wall(int32_t tof_mm)
+/* Body speed v and half wheel-speed difference (ticks/s) through both wheel loops. */
+static void drive_wheels(float v_body, float half_diff, const sensor_snapshot_t *snap, float dt)
 {
-    return tof_mm >= 0 && tof_mm < TOF_WALL_MAX_MM;
-}
+    float left  = wheel_duty(&s_wheel_left, v_body - half_diff, snap->left_ticks,
+                             snap->timestamp_ms, dt);
+    float right = wheel_duty(&s_wheel_right, v_body + half_diff, snap->right_ticks,
+                             snap->timestamp_ms, dt);
 
-/* Lateral error in mm: positive = too close to the right wall (steer left). */
-static float tof_lateral_error(const sensor_snapshot_t *snap)
-{
-    bool left  = side_is_wall(snap->left_tof);
-    bool right = side_is_wall(snap->right_tof);
-
-    if (left && right) {
-        return 0.5f * (float)(snap->left_tof - snap->right_tof);
-    }
-    if (left) {
-        return (float)(snap->left_tof - TOF_SIDE_TARGET_MM);
-    }
-    if (right) {
-        return (float)(TOF_SIDE_TARGET_MM - snap->right_tof);
-    }
-    return 0.0f; /* no side walls: drive straight */
-}
-
-/* Body yaw-rate reference (deg/s): IMU heading hold + ToF wall-centering summed directly. */
-static float steer_rate_ref(float yaw_err, float lat_err)
-{
-    return clamp_float(params_get(P_YAW_KP) * yaw_err + params_get(P_TOF_CENTER_KP) * lat_err,
-                       params_get(P_YAW_MAX_RATE_DPS));
-}
-
-/* Half the left/right wheel speed difference (ticks/s) that produces the yaw rate,
- * with gyro feedback correcting for wheel slip and wheelbase error. */
-static float wheel_half_diff(float rate_ref_dps, float rate_meas_dps)
-{
-    float rate = rate_ref_dps + YAW_RATE_KP * (rate_ref_dps - rate_meas_dps);
-
-    return (float)TURN_YAW_SIGN * rate * DEG_TO_RAD * (0.5f * WHEEL_BASE_MM) * TICKS_PER_MM;
+    motor_set_speed(&motor_left, round_duty(left));
+    motor_set_speed(&motor_right, round_duty(right));
 }
 
 /* ---- straight ---- */
 
-/* Trapezoid profile: accelerate to cruise, brake to reach the target with the speed
- * falling to the creep floor. Extending the target moves the braking point further away. */
+/* Distance trapezoid on the remaining ticks, from the selected speed profile.
+ * Extending the target moves the braking point further away. */
 static float next_speed_ref(int32_t remaining_ticks, float dt)
 {
-    const profile_params_t *p = &s_profiles[s_straight.profile];
-    float remaining = fmaxf((float)remaining_ticks, 0.0f);
-    float v_brake   = fmaxf(sqrtf(2.0f * params_get(p->decel) * TICKS_PER_MM * remaining),
-                            RUN_MIN_TICKS_S);
-    float v_up      = s_straight.v_ref + params_get(p->accel) * TICKS_PER_MM * dt;
-    float v         = fminf(fminf(v_up, params_get(p->cruise) * TICKS_PER_MM), v_brake);
+    const profile_params_t *p   = &s_profiles[s_straight.profile];
+    float                   tpm = params_ticks_per_mm();
+    profile_limits_t        lim = {
+        .v_max = params_get(p->cruise) * tpm,
+        .accel = params_get(p->accel) * tpm,
+        .decel = params_get(p->decel) * tpm,
+        .v_min = RUN_MIN_MM_S * tpm,
+    };
 
-    s_straight.v_ref = v;
-    return v;
+    s_straight.v_ref = profile_next(s_straight.v_ref, (float)remaining_ticks, dt, &lim);
+    return s_straight.v_ref;
 }
 
 static void begin_straight(const motion_cmd_t *cmd, const sensor_snapshot_t *snap)
@@ -292,21 +207,21 @@ static void begin_straight(const motion_cmd_t *cmd, const sensor_snapshot_t *sna
     s_straight.start_left   = snap->left_ticks;
     s_straight.start_right  = snap->right_ticks;
     s_straight.target_ticks = (int32_t)((float)cells * params_get(P_TICKS_PER_CELL));
-    s_straight.v_ref        = RUN_MIN_TICKS_S;
+    s_straight.v_ref        = RUN_MIN_MM_S * params_ticks_per_mm();
     s_straight.profile      = cmd->profile;
 
     s_status.target_ticks = s_straight.target_ticks;
 }
 
 /* Fill the straight part of the report from the current sample. */
-static void straight_report(const sensor_snapshot_t *snap, int32_t progress, float lat_err)
+static void straight_report(const sensor_snapshot_t *snap, int32_t progress)
 {
-    float v_mm_s = 0.5f * (s_wheel_left.est.v + s_wheel_right.est.v) / TICKS_PER_MM;
+    float v_mm_s = 0.5f * (s_wheel_left.v + s_wheel_right.v) / params_ticks_per_mm();
 
     s_report.distance_ticks  = progress;
-    s_report.heading_err_deg = wrap180(s_heading_ref - snap->yaw);
-    s_report.lat_err_end_mm  = lat_err;
-    s_report.lat_err_max_mm  = fmaxf(s_report.lat_err_max_mm, fabsf(lat_err));
+    s_report.heading_err_deg = steer_heading_err(&s_steer, snap->yaw);
+    s_report.lat_err_end_mm  = s_steer.lat_err;
+    s_report.lat_err_max_mm  = fmaxf(s_report.lat_err_max_mm, fabsf(s_steer.lat_err));
     s_report.peak_speed_mm_s = fmaxf(s_report.peak_speed_mm_s, v_mm_s);
 }
 
@@ -322,9 +237,9 @@ static void update_straight(const sensor_snapshot_t *snap, float dt)
 {
     int32_t progress = ((snap->left_ticks - s_straight.start_left) +
                         (snap->right_ticks - s_straight.start_right)) / 2;
-    float   lat_err  = tof_lateral_error(snap);
+    float   rate_ref = steer_rate_ref(&s_steer, snap);
 
-    straight_report(snap, progress, lat_err);
+    straight_report(snap, progress);
 
     if (snap->timestamp_ms - s_move_start_ms > straight_timeout_ms()) {
         ESP_LOGE(TAG, "segment timeout");
@@ -346,17 +261,8 @@ static void update_straight(const sensor_snapshot_t *snap, float dt)
     s_status.target_ticks   = s_straight.target_ticks;
     publish_status();
 
-    float v_body = next_speed_ref(s_straight.target_ticks - progress, dt);
-    float half   = wheel_half_diff(steer_rate_ref(s_report.heading_err_deg, lat_err),
-                                   snap->yaw_rate_dps);
-
-    float left_duty  = wheel_duty(&s_wheel_left, v_body - half,
-                                  snap->left_ticks, snap->timestamp_ms, dt);
-    float right_duty = wheel_duty(&s_wheel_right, v_body + half,
-                                  snap->right_ticks, snap->timestamp_ms, dt);
-
-    motor_set_speed(&motor_left, clamp_run_duty(left_duty));
-    motor_set_speed(&motor_right, clamp_run_duty(right_duty));
+    drive_wheels(next_speed_ref(s_straight.target_ticks - progress, dt),
+                 steer_wheel_half_diff(rate_ref), snap, dt);
 }
 
 /* ---- turn ---- */
@@ -367,7 +273,7 @@ static void begin_turn(const motion_cmd_t *cmd, const sensor_snapshot_t *snap)
 
     /* Turn relative to the carried heading reference, not to the current yaw, so the
      * residual error of one turn is not added to the next. */
-    s_heading_ref += (float)cmd->angle_deg * (float)TURN_YAW_SIGN;
+    s_steer.heading_ref += (float)cmd->angle_deg * (float)TURN_YAW_SIGN;
 
     s_turn.phase        = TURN_DRIVE;
     s_turn.angle_deg    = fabsf((float)cmd->angle_deg);
@@ -398,7 +304,7 @@ static void update_turn(const sensor_snapshot_t *snap, float dt)
 {
     (void)dt;
     uint32_t now     = snap->timestamp_ms;
-    float    yaw_err = wrap180(s_heading_ref - snap->yaw);
+    float    yaw_err = steer_heading_err(&s_steer, snap->yaw);
     float    abs_err = fabsf(yaw_err);
 
     s_report.heading_err_deg = yaw_err;
@@ -528,7 +434,7 @@ static void on_sensor_timeout(void)
 }
 
 /* Runs once per sensor snapshot: commands first, then one control step. */
-static void motion_control_task(void *arg)
+static void motion_task(void *arg)
 {
     (void)arg;
 
@@ -560,9 +466,9 @@ static void motion_control_task(void *arg)
     }
 }
 
-void motion_control_task_start(void)
+void motion_task_start(void)
 {
-    BaseType_t ok = xTaskCreatePinnedToCore(motion_control_task, "motion",
+    BaseType_t ok = xTaskCreatePinnedToCore(motion_task, "motion",
                                             MOTION_TASK_STACK, NULL,
                                             MOTION_TASK_PRIO, NULL,
                                             MOTION_TASK_CORE);

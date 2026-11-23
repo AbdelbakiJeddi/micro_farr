@@ -7,7 +7,7 @@
 #include "bench.h"
 #include "encoder.h"
 #include "imu.h"
-#include "motion_control_task.h"
+#include "motion_task.h"
 #include "motor.h"
 #include "params.h"
 #include "sensor_task.h"
@@ -48,7 +48,7 @@ static void app_init_and_start(void)
     app_ipc_set_event(APP_EVENT_CALIBRATED);
 
     sensor_task_start();
-    motion_control_task_start();
+    motion_task_start();
 }
 
 void app_main(void)
