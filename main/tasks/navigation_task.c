@@ -25,11 +25,6 @@ static bool wall_seen(int32_t tof_mm, int32_t limit_mm)
     return tof_mm >= 0 && tof_mm < limit_mm; /* invalid or far reading = open */
 }
 
-static bool at_goal(int x, int y)
-{
-    return x == MAZE_GOAL_X && y == MAZE_GOAL_Y;
-}
-
 /* Wait for the robot to settle, then fetch a fresh sensor snapshot. */
 static bool read_sensors_settled(sensor_snapshot_t *snapshot)
 {
@@ -100,12 +95,12 @@ static bool decide_continue(nav_state_t *n, int k)
     }
     cell_ahead(n, k, &x, &y);
     record_walls(&n->maze, x, y, n->dir, &s, NAV_RUN_FRONT_WALL_MM);
-    maze_flood(&n->maze, MAZE_GOAL_X, MAZE_GOAL_Y);
+    maze_flood(&n->maze);
 
     ESP_LOGI(TAG, "pass (%d,%d) L=%ld F=%ld R=%ld", x, y,
              (long)s.left_tof, (long)s.front_tof, (long)s.right_tof);
 
-    if (at_goal(x, y)) {
+    if (maze_is_goal(&n->maze, x, y)) {
         return false;
     }
     return maze_next_dir(&n->maze, x, y, n->dir) == (int)n->dir;
@@ -158,16 +153,20 @@ static bool run(nav_state_t *n)
     }
 
     int cells = cells_travelled(planned);
-    cell_ahead(n, cells, &n->x, &n->y);
+    for (int i = 0; i < cells; i++) {
+        maze_step(n->dir, &n->x, &n->y);
+        maze_mark_visited(&n->maze, n->x, n->y);
+    }
     return true;
 }
 
 static void nav_reset(nav_state_t *n)
 {
-    maze_init(&n->maze, MAZE_W, MAZE_H);
+    maze_init_configured(&n->maze);
     n->x   = MAZE_START_X;
     n->y   = MAZE_START_Y;
     n->dir = (maze_dir_t)MAZE_START_DIR;
+    maze_mark_visited(&n->maze, n->x, n->y);
 }
 
 static void log_cell(const nav_state_t *n, const sensor_snapshot_t *s)
@@ -188,10 +187,10 @@ static bool explore_step(nav_state_t *n)
         return false;
     }
     record_walls(&n->maze, n->x, n->y, n->dir, &s, NAV_FRONT_WALL_MM);
-    maze_flood(&n->maze, MAZE_GOAL_X, MAZE_GOAL_Y);
+    maze_flood(&n->maze);
     log_cell(n, &s);
 
-    if (at_goal(n->x, n->y)) {
+    if (maze_is_goal(&n->maze, n->x, n->y)) {
         return true;
     }
 
@@ -218,7 +217,7 @@ static bool solve_maze(nav_state_t *n)
         if (!explore_step(n)) {
             return false;
         }
-        if (at_goal(n->x, n->y)) {
+        if (maze_is_goal(&n->maze, n->x, n->y)) {
             return true;
         }
     }
@@ -240,8 +239,8 @@ static void navigation_task(void *arg)
         ESP_LOGI(TAG, "ready at (%d,%d): press a button to start", nav.x, nav.y);
         button_wait_press(NAV_START_DELAY_MS);
 
-        ESP_LOGI(TAG, "start: goal (%d,%d) in %dx%d maze",
-                 MAZE_GOAL_X, MAZE_GOAL_Y, MAZE_W, MAZE_H);
+        ESP_LOGI(TAG, "start: %d goal cell(s) in %dx%d maze",
+                 nav.maze.goal_count, MAZE_W, MAZE_H);
 
         if (solve_maze(&nav)) {
             ESP_LOGI(TAG, "GOAL reached at (%d,%d)", nav.x, nav.y);

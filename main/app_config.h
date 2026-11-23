@@ -153,8 +153,7 @@
 #define MAZE_START_X            0
 #define MAZE_START_Y            0
 #define MAZE_START_DIR          0
-#define MAZE_GOAL_X             1
-#define MAZE_GOAL_Y             1
+#define MAZE_GOAL_CELLS         { {1, 1} }  /* goal = group of cells, e.g. { {7,7}, {7,8}, {8,7}, {8,8} } */
 
 /* Navigation */
 #define NAV_FRONT_WALL_MM       TOF_WALL_MAX_MM  /* square robot: same wall threshold as the sides */

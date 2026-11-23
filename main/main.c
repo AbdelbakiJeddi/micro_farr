@@ -9,6 +9,7 @@
 #include "imu.h"
 #include "motion_task.h"
 #include "motor.h"
+#include "nvs_flash.h"
 #include "params.h"
 #include "sensor_task.h"
 #include "telemetry_task.h"
@@ -23,11 +24,25 @@ static void app_fatal(void)
     }
 }
 
+/* NVS holds the saved maze; a full or old-format partition is erased and re-initialised. */
+static esp_err_t storage_init(void)
+{
+    esp_err_t err = nvs_flash_init();
+
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        if (nvs_flash_erase() != ESP_OK) {
+            return ESP_FAIL;
+        }
+        err = nvs_flash_init();
+    }
+    return err;
+}
+
 static void app_init_and_start(void)
 {
     esp_log_level_set("*", ESP_LOG_NONE);
 
-    if (app_ipc_init() != ESP_OK) {
+    if (storage_init() != ESP_OK || app_ipc_init() != ESP_OK) {
         app_fatal();
     }
 

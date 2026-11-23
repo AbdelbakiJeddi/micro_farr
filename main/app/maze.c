@@ -2,13 +2,15 @@
 
 #include <string.h>
 
+#include "app_config.h"
+
 static const int8_t DX[4] = {0, 1, 0, -1};
 static const int8_t DY[4] = {1, 0, -1, 0};
 
 /* Relative preference when costs tie: straight, left, right, back. */
 static const int8_t PREFERENCE[4] = {0, -1, 1, 2};
 
-static bool in_maze(const maze_t *m, int x, int y)
+bool maze_contains(const maze_t *m, int x, int y)
 {
     return x >= 0 && y >= 0 && x < m->w && y < m->h;
 }
@@ -29,11 +31,17 @@ void maze_step(maze_dir_t d, int *x, int *y)
     *y += DY[d];
 }
 
-void maze_init(maze_t *m, uint8_t w, uint8_t h)
+void maze_init(maze_t *m, uint8_t w, uint8_t h, const maze_cell_t *goals, uint8_t goal_count)
 {
     memset(m, 0, sizeof(*m));
     m->w = w;
     m->h = h;
+
+    if (goal_count > MAZE_MAX_GOALS) {
+        goal_count = MAZE_MAX_GOALS;
+    }
+    memcpy(m->goals, goals, goal_count * sizeof(goals[0]));
+    m->goal_count = goal_count;
 
     for (int x = 0; x < w; x++) {
         m->walls[x][h - 1] |= 1U << DIR_NORTH;
@@ -43,6 +51,35 @@ void maze_init(maze_t *m, uint8_t w, uint8_t h)
         m->walls[0][y]     |= 1U << DIR_WEST;
         m->walls[w - 1][y] |= 1U << DIR_EAST;
     }
+}
+
+void maze_init_configured(maze_t *m)
+{
+    static const maze_cell_t goals[] = MAZE_GOAL_CELLS;
+
+    maze_init(m, MAZE_W, MAZE_H, goals, (uint8_t)(sizeof(goals) / sizeof(goals[0])));
+}
+
+bool maze_is_goal(const maze_t *m, int x, int y)
+{
+    for (int i = 0; i < m->goal_count; i++) {
+        if (m->goals[i].x == x && m->goals[i].y == y) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void maze_mark_visited(maze_t *m, int x, int y)
+{
+    if (maze_contains(m, x, y)) {
+        m->visited[x][y] = 1;
+    }
+}
+
+bool maze_visited(const maze_t *m, int x, int y)
+{
+    return maze_contains(m, x, y) && m->visited[x][y] != 0;
 }
 
 bool maze_has_wall(const maze_t *m, int x, int y, maze_dir_t d)
@@ -64,7 +101,7 @@ void maze_set_wall(maze_t *m, int x, int y, maze_dir_t d, bool present)
     int nx = x + DX[d];
     int ny = y + DY[d];
 
-    if (!in_maze(m, nx, ny)) {
+    if (!maze_contains(m, nx, ny)) {
         return; /* boundary wall: permanent */
     }
 
@@ -72,15 +109,17 @@ void maze_set_wall(maze_t *m, int x, int y, maze_dir_t d, bool present)
     write_wall(m, nx, ny, opposite(d), present);
 }
 
-void maze_flood(maze_t *m, int goal_x, int goal_y)
+void maze_flood(maze_t *m)
 {
     uint16_t queue[MAZE_MAX_SIZE * MAZE_MAX_SIZE];
     int head = 0;
     int tail = 0;
 
     memset(m->dist, MAZE_UNREACHABLE, sizeof(m->dist));
-    m->dist[goal_x][goal_y] = 0;
-    queue[tail++] = (uint16_t)(goal_x * MAZE_MAX_SIZE + goal_y);
+    for (int i = 0; i < m->goal_count; i++) {
+        m->dist[m->goals[i].x][m->goals[i].y] = 0;
+        queue[tail++] = (uint16_t)(m->goals[i].x * MAZE_MAX_SIZE + m->goals[i].y);
+    }
 
     while (head < tail) {
         int x = queue[head] / MAZE_MAX_SIZE;
@@ -93,7 +132,7 @@ void maze_flood(maze_t *m, int goal_x, int goal_y)
             }
             int nx = x + DX[d];
             int ny = y + DY[d];
-            if (!in_maze(m, nx, ny) || m->dist[nx][ny] != MAZE_UNREACHABLE) {
+            if (!maze_contains(m, nx, ny) || m->dist[nx][ny] != MAZE_UNREACHABLE) {
                 continue;
             }
             m->dist[nx][ny] = (uint8_t)(m->dist[x][y] + 1);
@@ -119,7 +158,7 @@ int maze_next_dir(const maze_t *m, int x, int y, maze_dir_t heading)
         }
         int nx = x + DX[d];
         int ny = y + DY[d];
-        if (!in_maze(m, nx, ny)) {
+        if (!maze_contains(m, nx, ny)) {
             continue;
         }
         if (m->dist[nx][ny] < best_val) {
