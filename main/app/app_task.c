@@ -18,7 +18,7 @@ static app_state_id_t state_not_ready(app_ctx_t *ctx)
 
 static const state_run_fn s_states[ST_COUNT] = {
     [ST_MENU]      = state_menu_run,
-    [ST_EXPLORE]   = state_not_ready,
+    [ST_EXPLORE]   = state_explore_run,
     [ST_SPEED_RUN] = state_not_ready,
     [ST_TUNER]     = state_tuner_run,
     [ST_FAULT]     = state_fault_run,

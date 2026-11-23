@@ -146,7 +146,6 @@
 /* Navigation */
 #define NAV_FRONT_WALL_MM       TOF_WALL_MAX_MM  /* square robot: same wall threshold as the sides */
 #define NAV_SENSE_SETTLE_MS     100     /* wait after stopping before reading walls */
-#define NAV_START_DELAY_MS      500
 /* While running: decide for the next cell once this fraction of the way to its centre has
  * been covered (0.7 = 75 mm before the centre of a 250 mm cell). It must leave more than
  * the braking distance v^2 / (2 * RUN_DECEL) = 34 mm at 450 mm/s. The front wall is then
@@ -154,8 +153,4 @@
 #define NAV_DECIDE_FRAC         0.7f
 #define NAV_RUN_FRONT_WALL_MM   325
 #define NAV_POLL_MS             10
-#define NAV_MOVE_WAIT_MS        (SEGMENT_TIMEOUT_MS + 2000)
 #define NAV_MAX_STEPS           60
-#define NAV_TASK_CORE           0
-#define NAV_TASK_PRIO           5
-#define NAV_TASK_STACK          4096

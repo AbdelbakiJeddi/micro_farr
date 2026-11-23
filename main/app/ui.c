@@ -104,6 +104,19 @@ bool ui_arm_and_wait(const char *title)
     return true;
 }
 
+void ui_wait_any(void)
+{
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(UI_POLL_MS));
+        ui_events_t ev = ui_poll();
+        for (int i = 0; i < BTN_COUNT; i++) {
+            if (ev.pressed[i]) {
+                return;
+            }
+        }
+    }
+}
+
 bool ui_run_guard(void)
 {
     if (ui_poll().pressed[BTN_DEC]) {

@@ -30,6 +30,9 @@ void ui_message(const char *title, const char *line1, const char *line2);
 /* "INC start / DEC back". INC: waits for release + START_DELAY_MS, returns true. */
 bool ui_arm_and_wait(const char *title);
 
+/* Block until any button is pressed. */
+void ui_wait_any(void);
+
 /* Call while a move runs: DEC sends motion_stop() and returns false. */
 bool ui_run_guard(void);
 
