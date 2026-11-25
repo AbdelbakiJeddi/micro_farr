@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>4. Timing: vTaskDelay vs vTaskDelayUntil · FreeRTOS, the Hard Way</title><link rel="stylesheet" href="assets/course.css"></head><body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#111"/></marker>
+<marker id="aho" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#e8590c"/></marker>
+<marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f9e44"/></marker>
+</defs></svg>
+<main>
+<p class="sub" style="margin:0 0 4px">FreeRTOS, the Hard Way · 4 / 11</p>
+<h1>4. Timing: vTaskDelay vs vTaskDelayUntil <span class="sl">main/tasks/sensor_task.c:71</span></h1>
+<p class="lead">"Run every 10 ms" and "wait 10 ms" are two different things.</p>
+<nav id="nav"></nav>
+
+<section>
+<h2>Build it from first principles</h2>
+<div class="split"><div>
+<h3>Time is a tick counter</h3>
+<p>The kernel counts ticks since boot (<code>xTaskGetTickCount()</code>). A delay moves the task to the delayed list with a wake-up tick; the tick interrupt moves it back to Ready when that tick arrives.</p>
+<h3>vTaskDelay: relative to now</h3>
+<p>Wake-up = the tick at which you call it + N. The work before the call adds to the period. With work wₖ in pass k:</p>
+<div class="eq">start(k+1) = start(k) + wₖ + P
+drift after n passes = w₀ + w₁ + … + wₙ₋₁</div>
+<h3>vTaskDelayUntil: relative to the last wake-up</h3>
+<p>You keep a variable <code>last_wake</code>; each call wakes at <code>last_wake + P</code> and then advances it by P. The work no longer matters, as long as it is shorter than P:</p>
+<div class="eq">start(k+1) = start(k) + P        (if wₖ &lt; P)</div>
+</div><div>
+<div class="cols">
+<div><div class="ct">Drifts</div>
+<pre>while (1) {
+    work();             // 2–5 ms
+    vTaskDelay(
+      pdMS_TO_TICKS(10));
+}</pre></div>
+<div><div class="ct">Fixed period</div>
+<pre>TickType_t last =
+    xTaskGetTickCount();
+while (1) {
+    work();
+    vTaskDelayUntil(&amp;last,
+      pdMS_TO_TICKS(10));
+}</pre></div>
+</div>
+</div></div>
+</section>
+
+<section>
+<h2>Break it: drift</h2>
+<div class="split"><div>
+<p>Each pass does 2 to 5 ms of work. Watch the start times against the 10 ms grid: with <code>vTaskDelay</code> they slide by the work time of every pass; with <code>vTaskDelayUntil</code> they stay on the grid.</p>
+<div class="legend" aria-label="Timeline colours"><span><i style="background:#343a40"></i>running</span><span><i style="background:#e4e1da"></i>ready or blocked, not running</span><span><i style="background:#e8590c"></i>problem: blocked too long, lost, late</span><span><i style="background:#2f9e44"></i>done / on time</span></div>
+</div><div><div id="tl-timing"></div></div></div>
+</section>
+
+<section>
+<h2>Why these values</h2>
+<div class="split"><div>
+<div class="why"><b>Why 10 ms, and how many ticks is that?</b> <code>SENSOR_TASK_HZ = 100</code> gives a 1000 / 100 = 10 ms period; at a 1000 Hz tick, <code>pdMS_TO_TICKS(10)</code> = 10 ticks, exact.</div>
+<div class="why"><b>What if a pass is longer than the period?</b> <code>vTaskDelayUntil</code> returns at once to catch up, and the newer <code>xTaskDelayUntil()</code> returns <code>pdFALSE</code> so you can count overruns.</div>
+</div><div>
+<div class="why"><b>Why does the motion task have no delay at all?</b> Its period is set by the data: it blocks until the sensor signals a new sample. Its time step <code>dt</code> comes from the snapshot timestamps, clamped to 1–50 ms, so a late sample cannot make the controller jump.</div>
+<div class="why"><b>Why a 50 ms sensor-lost timeout?</b> 50 ms is 5 missed samples: long enough to ride out a busy I2C bus, short enough that at 450 mm/s the robot covers only 22.5 mm blind before it brakes.</div>
+</div></div>
+</section>
+
+<section>
+<div class="key"><b>To remember.</b> A periodic loop uses <code>vTaskDelayUntil(&amp;last_wake, period)</code>. <code>vTaskDelay</code> means "wait at least this long", not "run every".</div>
+<div class="anchor"><b>In micro_farr.</b> <code>main/tasks/sensor_task.c:71-84</code>: the 100 Hz loop with <code>vTaskDelayUntil</code>. <code>main/tasks/motion/motion_task.c:424</code>: the motion task waits for the sensor signal with a 50 ms timeout (<code>MOTION_SENSOR_TIMEOUT_MS</code>, <code>app_config.h:111</code>).</div>
+<details><summary>Deep dive: rounding</summary>
+<p><code>pdMS_TO_TICKS(ms)</code> = ms × tick rate / 1000, rounded <b>down</b>. At 100 Hz, 5 ms becomes 0 ticks and <code>vTaskDelay(0)</code> does not wait at all; 15 ms becomes 1 tick. A delay of N ticks waits between N−1 and N tick periods, because the call can land anywhere inside the current tick.</p>
+</details>
+</section>
+<div class="pn" id="pn"></div>
+</main>
+<script src="assets/course.js"></script>
+<script>nav('timing');
+mount('tl-timing', {
+  label: 'Periodic loop timeline', sim: SIM.timing, init: { api: 'delay' },
+  toggles: [{ key: 'api', label: 'Delay call', options: [['delay', 'vTaskDelay(10)'], ['until', 'vTaskDelayUntil(10)']] }],
+  predict: { q: 'Each pass does 2–5 ms of work, then calls <code>vTaskDelay(10 ms)</code>. How many passes start within 60 ms?',
+    choices: [['4', '4'], ['5', '5'], ['6', '6']], whenText: 'vTaskDelay(10)', label: v => v,
+    when: s => s.api === 'delay',
+    why: 'Each period is work + 10 ms, so the passes slide off the grid. vTaskDelayUntil gives all 6.' } });</script>
+</body></html>

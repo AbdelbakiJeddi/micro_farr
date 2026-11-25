@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>3. Scheduler: priorities and preemption · FreeRTOS, the Hard Way</title><link rel="stylesheet" href="assets/course.css"></head><body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#111"/></marker>
+<marker id="aho" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#e8590c"/></marker>
+<marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f9e44"/></marker>
+</defs></svg>
+<main>
+<p class="sub" style="margin:0 0 4px">FreeRTOS, the Hard Way · 3 / 11</p>
+<h1>3. Scheduler: priorities and preemption <span class="sl">main/app_config.h:42</span></h1>
+<p class="lead">Several tasks are ready, one CPU is free. Four rules decide who runs.</p>
+<nav id="nav"></nav>
+
+<section>
+<h2>Build it from first principles</h2>
+<div class="split"><div>
+<h3>When does the scheduler run?</h3>
+<p>The scheduler is kernel code that picks the next task. It runs at two kinds of moments: on every <b>tick</b> interrupt, and whenever a task blocks or makes another task ready (sending to a queue, setting a bit, giving a mutex).</p>
+<h3>How does it choose?</h3>
+<p>The kernel keeps one <b>ready list per priority</b>. Choosing is just "take the first task of the highest non-empty list", so it costs the same with 3 tasks or 30.</p>
+<h3>The four rules that follow</h3>
+<ul class="pts">
+<li>The highest-priority <b>Ready</b> task runs.</li>
+<li>A higher-priority task that becomes ready runs <b>at once</b>: preemption, no wait for the tick.</li>
+<li>Equal priorities take turns at every tick: <b>time slicing</b>.</li>
+<li>Nothing ready: the <b>idle task</b> (priority 0) runs.</li>
+</ul>
+</div><div><figure>
+<svg viewBox="0 0 690 230" role="img" aria-label="Ready lists by priority on core 1">
+  <g font-size="12">
+    <text x="10" y="20" font-weight="700">Ready lists (core 1)</text>
+    <text x="20" y="54">prio 10</text><rect x="90" y="36" width="270" height="28" fill="#faf9f7" stroke="#e4e1da"/>
+    <rect x="96" y="40" width="130" height="20" rx="4" fill="#fff" stroke="#2f9e44" stroke-width="2"/><text x="161" y="55" text-anchor="middle" font-weight="700" fill="#2f9e44">motion ● running</text>
+    <text x="20" y="90">prio 9</text><rect x="90" y="72" width="270" height="28" fill="#faf9f7" stroke="#e4e1da"/><text x="100" y="91" fill="#4a5058" font-style="italic">empty: sensor is Blocked</text>
+    <text x="20" y="126">prio 1–8</text><rect x="90" y="108" width="270" height="28" fill="#faf9f7" stroke="#e4e1da"/><text x="100" y="127" fill="#4a5058" font-style="italic">empty</text>
+    <text x="20" y="162">prio 0</text><rect x="90" y="144" width="270" height="28" fill="#faf9f7" stroke="#e4e1da"/>
+    <rect x="96" y="148" width="90" height="20" rx="4" fill="#fff" stroke="#111"/><text x="141" y="163" text-anchor="middle">IDLE1</text>
+    <text x="10" y="200" fill="#4a5058" font-size="11">scheduler: take the first task of the highest non-empty list</text>
+    <text x="420" y="20" font-weight="700">Blocked (waiting)</text>
+    <rect x="410" y="36" width="270" height="62" rx="6" fill="#fff" stroke="#111"/>
+    <text x="420" y="56">delayed list, sorted by wake time:</text>
+    <rect x="420" y="66" width="250" height="22" rx="4" fill="#f4f2ee" stroke="#111"/><text x="545" y="81" text-anchor="middle">sensor · wakes at next 10 ms</text>
+    <rect x="410" y="110" width="270" height="62" rx="6" fill="#fff" stroke="#111"/>
+    <text x="420" y="130">waiting on a queue / bits:</text>
+    <text x="420" y="152" fill="#4a5058" font-style="italic">(motion, between two samples)</text>
+  </g>
+  <path d="M410,77 L365,86" fill="none" stroke="#111" stroke-dasharray="4 3" marker-end="url(#ah)"/>
+  <text x="388" y="110" font-size="10.5" fill="#4a5058" text-anchor="middle">time</text><text x="388" y="122" font-size="10.5" fill="#4a5058" text-anchor="middle">up</text>
+</svg>
+<figcaption>One instant on core 1. Ready tasks sit in one list per priority; blocked tasks sit in a delayed list or in the wait list of a queue or event group. When the sensor's wake time comes, it moves to the prio 9 list.</figcaption>
+</figure></div></div>
+</section>
+
+<section>
+<h2>Break it: starvation</h2>
+<div class="split"><div>
+<p>The first rule has a dark side: a high-priority task that never blocks keeps the CPU forever. Below, the control task (priority 3) waits for the next sample either by <b>blocking</b> or by <b>polling</b> a flag in a loop.</p>
+<p>Polling looks harmless. At priority 3 it means the sensor task (priority 2) never runs, so the flag is never set: the control task waits for itself. The idle task never runs either, and the ESP-IDF task watchdog resets the chip.</p>
+<div class="legend" aria-label="Timeline colours"><span><i style="background:#343a40"></i>running</span><span><i style="background:#e4e1da"></i>ready or blocked, not running</span><span><i style="background:#e8590c"></i>problem: blocked too long, lost, late</span><span><i style="background:#2f9e44"></i>done / on time</span></div>
+</div><div><div id="tl-starve"></div></div></div>
+</section>
+
+<section>
+<h2>Why these values</h2>
+<div class="split"><div>
+<div class="why"><b>Why a 1000 Hz tick?</b> The tick is the unit of every timeout and delay. At 1000 Hz (<code>CONFIG_FREERTOS_HZ=1000</code>) the resolution is 1 ms, which the 10 ms sensor period and the 50 ms sensor-lost timeout need. The ESP-IDF default of 100 Hz would make <code>pdMS_TO_TICKS(5)</code> equal 0. The cost is 1000 short interrupts per second per core.</div>
+<div class="why"><b>Why a 5 s watchdog?</b> <code>CONFIG_ESP_TASK_WDT_TIMEOUT_S=5</code> watches both idle tasks. Long enough for slow blocking work such as the 2 s IMU calibration (1000 samples × 2 ms, with delays between them), short enough to catch a task stuck in a loop.</div>
+</div><div>
+<div class="why"><b>Why motion 10 above sensor 9?</b> Both run on core 1. The sensor publishes a snapshot, then signals; because motion is higher, it starts its control step the instant the signal is set, without waiting for the sensor task to reach its delay.</div>
+<div class="why"><b>Does taskYIELD() fix polling?</b> No. It only gives the CPU to another ready task of the <b>same</b> priority; lower tasks still never run.</div>
+</div></div>
+</section>
+
+<section>
+<div class="key"><b>To remember.</b> A priority is a promise to block. The higher the priority, the shorter the work between two blocking calls must be.</div>
+<div class="anchor"><b>In micro_farr.</b> <code>main/app_config.h:42-47</code>: motion 10 &gt; sensor 9 on core 1, app 3 on core 0. Every task blocks in each loop pass: sensor in <code>vTaskDelayUntil</code>, motion on the sensor signal, app on button polls and move waits. <code>sdkconfig</code>: watchdog on both idle tasks, 5 s.</div>
+<details><summary>Deep dive: time slicing and the idle task</summary>
+<p>Time slicing only matters between tasks of equal priority. micro_farr gives every task its own priority, so it never time-slices.</p>
+<p>The idle task frees the memory of deleted tasks and feeds the task watchdog. Code that must run "when nothing else does" can hook into it, but must never block there.</p>
+</details>
+</section>
+<div class="pn" id="pn"></div>
+</main>
+<script src="assets/course.js"></script>
+<script>nav('sched');
+mount('tl-starve', {
+  label: 'Starvation timeline', sim: SIM.starve, init: { ctrl: 'busy' },
+  toggles: [{ key: 'ctrl', label: 'Control task waits by', options: [['busy', 'polling a flag'], ['block', 'blocking']] }],
+  predict: { q: 'The control task runs <code>while (!new_sample) {}</code> at priority 3. How many samples does the sensor task (priority 2) read in 40 ms?',
+    choices: [['0', '0'], ['2', '2'], ['4', '4']], whenText: '“polling a flag”', label: v => v,
+    when: s => s.ctrl === 'busy',
+    why: 'The sensor never runs, so the flag is never set. Switch to blocking: 4 samples, and the CPU is idle most of the time.' } });</script>
+</body></html>

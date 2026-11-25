@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>10. Designing a system · FreeRTOS, the Hard Way</title><link rel="stylesheet" href="assets/course.css"></head><body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#111"/></marker>
+<marker id="aho" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#e8590c"/></marker>
+<marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f9e44"/></marker>
+</defs></svg>
+<main>
+<p class="sub" style="margin:0 0 4px">FreeRTOS, the Hard Way · 10 / 11</p>
+<h1>10. Designing a system <span class="sl">docs/architecture.md</span></h1>
+<p class="lead">How micro_farr ended up with three tasks, and how to do the same for any project.</p>
+<nav id="nav"></nav>
+
+<section>
+<h2>The method</h2>
+<div class="split"><div>
+<ol>
+<li><b>List the jobs</b> with their period and deadline.</li>
+<li><b>Group</b> jobs that share data and period into one task; split jobs with different deadlines.</li>
+<li><b>Priority follows the deadline</b>: the shortest deadline gets the highest priority (deadline-monotonic ordering).</li>
+<li><b>One channel per data flow</b>: command → queue, state → mailbox, "it happened" → event bit.</li>
+<li><b>One owner per resource</b>: motors → motion task; OLED, buttons, flash → app task.</li>
+<li><b>Size and place</b>: measure stack high-water marks; pin the time-critical tasks to their own core.</li>
+</ol>
+<div class="scroll"><table>
+<tr><th>Job</th><th>Period</th><th>Deadline</th><th>Task</th></tr>
+<tr><td>Read ToF, gyro, encoders</td><td>10 ms</td><td>10 ms</td><td>sensor · prio 9 · core 1</td></tr>
+<tr><td>Profile → steering → wheel PI → motors</td><td>every sample</td><td>before the next sample</td><td>motion · prio 10 · core 1</td></tr>
+<tr><td>Menu, buttons, OLED, maze, path, flash</td><td>50 ms UI poll</td><td>human (~100 ms)</td><td>app · prio 3 · core 0</td></tr>
+</table></div>
+</div><div><figure>
+<svg viewBox="0 0 700 300" role="img" aria-label="micro_farr tasks and IPC channels">
+  <g font-size="12">
+    <rect x="10" y="30" width="110" height="46" rx="6" fill="#fff" stroke="#4a5058"/><text x="65" y="50" text-anchor="middle" fill="#4a5058">ToF · IMU</text><text x="65" y="65" text-anchor="middle" fill="#4a5058">encoders</text>
+    <rect x="160" y="30" width="120" height="46" rx="8" fill="#f4f2ee" stroke="#111" stroke-width="1.5"/><text x="220" y="50" text-anchor="middle" font-weight="700">sensor</text><text x="220" y="65" text-anchor="middle" font-size="11">prio 9 · core 1</text>
+    <rect x="320" y="30" width="120" height="46" rx="6" fill="#fff" stroke="#111"/><text x="380" y="50" text-anchor="middle">snapshot</text><text x="380" y="65" text-anchor="middle" font-size="11">mailbox</text>
+    <rect x="480" y="30" width="120" height="46" rx="8" fill="#f4f2ee" stroke="#2f9e44" stroke-width="2"/><text x="540" y="50" text-anchor="middle" font-weight="700">motion</text><text x="540" y="65" text-anchor="middle" font-size="11">prio 10 · core 1</text>
+    <rect x="630" y="30" width="62" height="46" rx="6" fill="#fff" stroke="#4a5058"/><text x="661" y="57" text-anchor="middle" fill="#4a5058">motors</text>
+    <rect x="320" y="104" width="120" height="36" rx="6" fill="#fff" stroke="#111"/><text x="380" y="126" text-anchor="middle" font-size="11">SENSOR_NEW bit</text>
+    <rect x="160" y="214" width="120" height="46" rx="8" fill="#f4f2ee" stroke="#111" stroke-width="1.5"/><text x="220" y="234" text-anchor="middle" font-weight="700">app</text><text x="220" y="249" text-anchor="middle" font-size="11">prio 3 · core 0</text>
+    <rect x="320" y="178" width="140" height="36" rx="6" fill="#fff" stroke="#111"/><text x="390" y="200" text-anchor="middle" font-size="11">command queue (4)</text>
+    <rect x="320" y="240" width="140" height="46" rx="6" fill="#fff" stroke="#111"/><text x="390" y="260" text-anchor="middle" font-size="11">status mailbox</text><text x="390" y="275" text-anchor="middle" font-size="11">+ MOVE_DONE / FAULT</text>
+    <rect x="10" y="214" width="110" height="46" rx="6" fill="#fff" stroke="#4a5058"/><text x="65" y="234" text-anchor="middle" fill="#4a5058">OLED · buttons</text><text x="65" y="249" text-anchor="middle" fill="#4a5058">NVS flash</text>
+  </g>
+  <g fill="none" stroke="#111" stroke-width="1.4">
+    <path d="M120,53 L158,53" marker-end="url(#ah)"/>
+    <path d="M280,53 L318,53" marker-end="url(#ah)"/>
+    <path d="M440,53 L478,53" marker-end="url(#ah)"/>
+    <path d="M600,53 L628,53" marker-end="url(#ah)"/>
+    <path d="M250,76 L318,118" marker-end="url(#ah)"/>
+    <path d="M440,122 L510,78" marker-end="url(#ah)"/>
+    <path d="M330,76 L240,212" stroke-dasharray="4 3" marker-end="url(#ah)"/>
+    <path d="M280,228 L318,200" marker-end="url(#ah)"/>
+    <path d="M460,190 L540,78" marker-end="url(#ah)"/>
+    <path d="M570,76 L462,262" marker-end="url(#ah)"/>
+    <path d="M320,262 L282,250" marker-end="url(#ah)"/>
+    <path d="M158,237 L122,237" marker-start="url(#ah)" marker-end="url(#ah)"/>
+  </g>
+  <text x="250" y="160" font-size="10.5" fill="#4a5058" text-anchor="end">walls (peek)</text>
+</svg>
+<figcaption>Data flows left to right on top (sensors → motion → motors). The app commands the motion task through the queue and learns the outcome through the status mailbox and event bits. The dashed arrow is the app peeking the snapshot to read walls.</figcaption>
+</figure></div></div>
+</section>
+
+<section>
+<h2>Why these choices</h2>
+<div class="split"><div>
+<div class="why"><b>Why three tasks, not four?</b> A separate UI task was considered. It would add two more channels, and every FSM state would be split across two tasks, to drive a screen nobody reads while the robot moves. Only one FSM state is active at a time, so the app task draws its own screen.</div>
+<div class="why"><b>Why is motion above sensor, when the sensor comes first?</b> Deadline ordering ties them (same 10 ms). The tie is broken by the data flow: motion must react the instant a sample is published, before the sensor task finishes its loop.</div>
+</div><div>
+<div class="why"><b>Why does the app poll buttons every 50 ms?</b> <code>UI_POLL_MS = 50</code>: a human button press lasts about 100 ms or more, so polling every 50 ms never misses one, and the app spends almost all of its time blocked in <code>vTaskDelay</code>.</div>
+<div class="why"><b>Why one event group for everything?</b> Four bits in one word, one object to create and inspect. The bits never collide because each has one setter.</div>
+</div></div>
+</section>
+
+<section>
+<div class="key"><b>To remember.</b> Tasks follow deadlines; channels follow data. Commands → queue, state → mailbox, "it happened" → event bit. One owner per resource.</div>
+<div class="anchor"><b>In micro_farr.</b> <code>docs/architecture.md</code>: the same design with the hardware, FSM and control-cascade diagrams. <code>main/app_ipc.h</code>: every channel in one header.</div>
+</section>
+<div class="pn" id="pn"></div>
+</main>
+<script src="assets/course.js"></script>
+<script>nav('design');</script>
+</body></html>

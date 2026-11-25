@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>5. Queues: passing data · FreeRTOS, the Hard Way</title><link rel="stylesheet" href="assets/course.css"></head><body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#111"/></marker>
+<marker id="aho" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#e8590c"/></marker>
+<marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f9e44"/></marker>
+</defs></svg>
+<main>
+<p class="sub" style="margin:0 0 4px">FreeRTOS, the Hard Way · 5 / 11</p>
+<h1>5. Queues: passing data <span class="sl">main/app_ipc.c:41</span></h1>
+<p class="lead">A queue moves copies of data between tasks, and blocks the side that has to wait.</p>
+<nav id="nav"></nav>
+
+<section>
+<h2>The problem</h2>
+<p>Tasks must exchange data. The obvious tool, a global variable, fails in three ways: a reader can be preempted halfway through copying a struct (a <b>torn read</b>); a second write can replace a value nobody read yet (a <b>lost update</b>); and the reader has no way to sleep until data arrives, so it polls.</p>
+<p>The old micro_farr firmware had the second bug: the number of cells to drive was a <code>static</code> set by one task and read later by another.</p>
+</section>
+
+<section>
+<h2>Build it from first principles</h2>
+<div class="split"><div>
+<h3>A ring buffer of fixed slots</h3>
+<p>A queue reserves <code>length × item_size</code> bytes at creation. Send copies the item into the next free slot; receive copies the oldest one out (FIFO).</p>
+<h3>Copy, not share</h3>
+<p>Because items are copied, the sender can reuse its variable at once, and sender and receiver never touch the same memory.</p>
+<h3>Two wait lists</h3>
+<p>The queue keeps a list of tasks blocked on "empty" and a list blocked on "full". A send wakes the first receiver waiting; a receive wakes the first sender waiting. That is how a queue replaces polling.</p>
+</div><div><figure>
+<svg viewBox="0 0 680 130" role="img" aria-label="A queue of four slots between two tasks">
+  <g font-size="13">
+    <rect x="10" y="44" width="120" height="44" rx="8" fill="#fff" stroke="#111" stroke-width="1.5"/><text x="70" y="65" text-anchor="middle" font-weight="700">app task</text><text x="70" y="80" text-anchor="middle" font-size="11" fill="#4a5058">producer</text>
+    <rect x="550" y="44" width="120" height="44" rx="8" fill="#fff" stroke="#111" stroke-width="1.5"/><text x="610" y="65" text-anchor="middle" font-weight="700">motion task</text><text x="610" y="80" text-anchor="middle" font-size="11" fill="#4a5058">consumer</text>
+    <rect x="220" y="46" width="60" height="40" fill="#fff" stroke="#111"/>
+    <rect x="280" y="46" width="60" height="40" fill="#f4f2ee" stroke="#111"/><text x="310" y="71" text-anchor="middle" font-size="12">cmd 3</text>
+    <rect x="340" y="46" width="60" height="40" fill="#f4f2ee" stroke="#111"/><text x="370" y="71" text-anchor="middle" font-size="12">cmd 2</text>
+    <rect x="400" y="46" width="60" height="40" fill="#f4f2ee" stroke="#111"/><text x="430" y="71" text-anchor="middle" font-size="12">cmd 1</text>
+  </g>
+  <g fill="none" stroke="#111" stroke-width="1.5"><path d="M130,66 L218,66" marker-end="url(#ah)"/><path d="M460,66 L548,66" marker-end="url(#ah)"/></g>
+  <g font-size="11.5"><text x="174" y="38" text-anchor="middle">xQueueSend</text><text x="174" y="104" text-anchor="middle" fill="#4a5058">copy in</text>
+  <text x="504" y="38" text-anchor="middle">xQueueReceive</text><text x="504" y="104" text-anchor="middle" fill="#4a5058">copy out, oldest first</text>
+  <text x="340" y="120" text-anchor="middle" fill="#4a5058">length 4 · each slot holds a whole motion_cmd_t</text></g>
+</svg>
+<figcaption>A queue is a FIFO of fixed-size slots. Sending copies the item into a slot and receiving copies it out, so the two tasks never touch the same memory.</figcaption>
+</figure>
+<pre>QueueHandle_t q = xQueueCreate(4, sizeof(motion_cmd_t));
+
+motion_cmd_t cmd = { .type = MOVE_STRAIGHT, .cells = 3 };
+if (xQueueSend(q, &amp;cmd, pdMS_TO_TICKS(100)) != pdPASS) {
+    /* still full after 100 ms */
+}
+
+motion_cmd_t rx;
+while (xQueueReceive(q, &amp;rx, 0) == pdTRUE) {   // 0 = don't wait
+    handle(&amp;rx);
+}</pre>
+</div></div>
+</section>
+
+<section>
+<h2>Break it: a full queue</h2>
+<div class="split"><div>
+<p>A queue has a size, so it can be full. The sender's timeout decides what happens then: <b>0</b> means "give up, the item is lost"; <b>portMAX_DELAY</b> means "block until there is room", which slows the producer down to the consumer's speed (<b>back-pressure</b>).</p>
+<p>Here the producer is 5 times faster than the consumer. A bigger queue only delays the problem; the rates have to match.</p>
+<div class="legend" aria-label="Timeline colours"><span><i style="background:#343a40"></i>running</span><span><i style="background:#e4e1da"></i>ready or blocked, not running</span><span><i style="background:#e8590c"></i>problem: blocked too long, lost, late</span><span><i style="background:#2f9e44"></i>done / on time</span></div>
+</div><div><div id="tl-queue"></div></div></div>
+</section>
+
+<section>
+<h2>Why these values</h2>
+<div class="split"><div>
+<div class="why"><b>Why length 4?</b> Between two motion samples (10 ms) the app sends at most a burst of two or three commands: a move, an extend, or a stop. The motion task drains all of them at every sample, so 4 slots cover the burst with one to spare.</div>
+<div class="why"><b>Why 12 bytes per item?</b> <code>sizeof(motion_cmd_t)</code> = type (4) + cells (2) + angle (2) + profile (4) = 12 bytes, verified with the compiler. The whole queue is 48 bytes of storage.</div>
+</div><div>
+<div class="why"><b>Why a 100 ms send timeout?</b> 100 ms is 10 motion samples. If the queue is still full after that, the motion task is stuck: <code>motion_client</code> returns <code>ESP_ERR_TIMEOUT</code> instead of hanging the app.</div>
+<div class="why"><b>Why does the motion task receive with timeout 0?</b> It must never block on commands: its blocking point is the sensor signal. It takes whatever is waiting, then runs its control step.</div>
+</div></div>
+</section>
+
+<section>
+<div class="key"><b>To remember.</b> A queue copies the data, so sender and receiver share nothing. Size it for the largest burst, and choose what a full queue means: wait (back-pressure), or drop and report.</div>
+<div class="anchor"><b>In micro_farr.</b> <code>main/app_ipc.c:6,41</code>: command queue of 4 <code>motion_cmd_t</code>. <code>main/app/motion_client.c:15-17</code>: send with a 100 ms timeout. <code>main/tasks/motion/motion_task.c:427</code>: drain with timeout 0 at each sample. Commands carry their own cell count, which removed the old shared-static bug.</div>
+<details><summary>Deep dive: pointers and interrupts</summary>
+<p>Queueing a pointer copies only the address: the data now has two users, and you need a rule for who frees it. Prefer small structs by value; for big buffers, queue pointers into a pool where each buffer has exactly one owner at a time.</p>
+<p>From an interrupt use <code>xQueueSendFromISR(q, &amp;item, &amp;woken)</code>, then <code>portYIELD_FROM_ISR(woken)</code>, so the task you woke runs right after the interrupt instead of at the next tick.</p>
+</details>
+</section>
+<div class="pn" id="pn"></div>
+</main>
+<script src="assets/course.js"></script>
+<script>nav('queues');
+mount('tl-queue', {
+  label: 'Queue timeline', sim: SIM.queue, init: { wait: 'zero' },
+  toggles: [{ key: 'wait', label: 'Send timeout', options: [['zero', '0 (do not wait)'], ['max', 'portMAX_DELAY']] }],
+  predict: { q: 'The producer tries to send every 2 ms (20 tries); the consumer takes one item every 10 ms; the queue holds 4. With timeout 0, how many items are lost?',
+    choices: [['0', '0'], ['4', '4'], ['9', '9'], ['12', '12']], whenText: 'timeout 0', label: v => v,
+    when: s => s.wait === 'zero',
+    why: 'The queue is full by 8 ms; after that only one send in five finds a free slot. With portMAX_DELAY nothing is lost, but the producer is blocked 27 ms of the 40.' } });</script>
+</body></html>

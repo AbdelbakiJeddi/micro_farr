@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FreeRTOS, the Hard Way</title><link rel="stylesheet" href="assets/course.css"></head><body>
+<main>
+<h1>FreeRTOS, the Hard Way</h1>
+<p class="sub">A complete course on FreeRTOS, built on a real robot: micro_farr (ESP32-S3, ESP-IDF v6.1). Every timeline is live: predict first, then step through it and break it. Every number comes from this project.</p>
+<nav id="nav"></nav>
+<div class="split"><div>
+<h2>The path</h2>
+<p>Each page needs only the pages before it. Pages 1–4 are about running tasks; 5–7 about tasks talking to each other; 8–9 about what goes wrong when they share; 10–11 put it together.</p>
+<div class="grid"><a class="card" href="01-why-rtos.html"><h4>1 · Why an RTOS</h4><span class="small">One slow job makes a fast job late</span></a><a class="card" href="02-tasks.html"><h4>2 · Tasks</h4><span class="small">Stack, TCB, the four states</span></a><a class="card" href="03-scheduler.html"><h4>3 · Scheduler</h4><span class="small">Priorities, preemption, starvation</span></a><a class="card" href="04-timing.html"><h4>4 · Timing</h4><span class="small">vTaskDelay vs vTaskDelayUntil</span></a><a class="card" href="05-queues.html"><h4>5 · Queues</h4><span class="small">Copies, back-pressure, full queues</span></a><a class="card" href="06-mailbox.html"><h4>6 · Mailbox</h4><span class="small">The latest value, read by many</span></a><a class="card" href="07-events.html"><h4>7 · Events</h4><span class="small">Bits that remember, stale bits</span></a><a class="card" href="08-shared-data.html"><h4>8 · Shared data</h4><span class="small">Races, mutexes, priority inversion</span></a><a class="card" href="09-dual-core.html"><h4>9 · Dual core</h4><span class="small">Pinning, spinlocks, flash stalls</span></a><a class="card" href="10-design.html"><h4>10 · Design</h4><span class="small">From jobs to tasks and channels</span></a><a class="card" href="11-synthesis.html"><h4>11 · Synthesis</h4><span class="small">Cheat sheet and ten rules</span></a></div>
+</div><div>
+<h2>The robot</h2>
+<figure>
+<svg viewBox="0 0 700 300" role="img" aria-label="micro_farr tasks and IPC channels">
+  <g font-size="12">
+    <rect x="10" y="30" width="110" height="46" rx="6" fill="#fff" stroke="#4a5058"/><text x="65" y="50" text-anchor="middle" fill="#4a5058">ToF · IMU</text><text x="65" y="65" text-anchor="middle" fill="#4a5058">encoders</text>
+    <rect x="160" y="30" width="120" height="46" rx="8" fill="#f4f2ee" stroke="#111" stroke-width="1.5"/><text x="220" y="50" text-anchor="middle" font-weight="700">sensor</text><text x="220" y="65" text-anchor="middle" font-size="11">prio 9 · core 1</text>
+    <rect x="320" y="30" width="120" height="46" rx="6" fill="#fff" stroke="#111"/><text x="380" y="50" text-anchor="middle">snapshot</text><text x="380" y="65" text-anchor="middle" font-size="11">mailbox</text>
+    <rect x="480" y="30" width="120" height="46" rx="8" fill="#f4f2ee" stroke="#2f9e44" stroke-width="2"/><text x="540" y="50" text-anchor="middle" font-weight="700">motion</text><text x="540" y="65" text-anchor="middle" font-size="11">prio 10 · core 1</text>
+    <rect x="630" y="30" width="62" height="46" rx="6" fill="#fff" stroke="#4a5058"/><text x="661" y="57" text-anchor="middle" fill="#4a5058">motors</text>
+    <rect x="320" y="104" width="120" height="36" rx="6" fill="#fff" stroke="#111"/><text x="380" y="126" text-anchor="middle" font-size="11">SENSOR_NEW bit</text>
+    <rect x="160" y="214" width="120" height="46" rx="8" fill="#f4f2ee" stroke="#111" stroke-width="1.5"/><text x="220" y="234" text-anchor="middle" font-weight="700">app</text><text x="220" y="249" text-anchor="middle" font-size="11">prio 3 · core 0</text>
+    <rect x="320" y="178" width="140" height="36" rx="6" fill="#fff" stroke="#111"/><text x="390" y="200" text-anchor="middle" font-size="11">command queue (4)</text>
+    <rect x="320" y="240" width="140" height="46" rx="6" fill="#fff" stroke="#111"/><text x="390" y="260" text-anchor="middle" font-size="11">status mailbox</text><text x="390" y="275" text-anchor="middle" font-size="11">+ MOVE_DONE / FAULT</text>
+    <rect x="10" y="214" width="110" height="46" rx="6" fill="#fff" stroke="#4a5058"/><text x="65" y="234" text-anchor="middle" fill="#4a5058">OLED · buttons</text><text x="65" y="249" text-anchor="middle" fill="#4a5058">NVS flash</text>
+  </g>
+  <g fill="none" stroke="#111" stroke-width="1.4">
+    <path d="M120,53 L158,53" marker-end="url(#ah)"/>
+    <path d="M280,53 L318,53" marker-end="url(#ah)"/>
+    <path d="M440,53 L478,53" marker-end="url(#ah)"/>
+    <path d="M600,53 L628,53" marker-end="url(#ah)"/>
+    <path d="M250,76 L318,118" marker-end="url(#ah)"/>
+    <path d="M440,122 L510,78" marker-end="url(#ah)"/>
+    <path d="M330,76 L240,212" stroke-dasharray="4 3" marker-end="url(#ah)"/>
+    <path d="M280,228 L318,200" marker-end="url(#ah)"/>
+    <path d="M460,190 L540,78" marker-end="url(#ah)"/>
+    <path d="M570,76 L462,262" marker-end="url(#ah)"/>
+    <path d="M320,262 L282,250" marker-end="url(#ah)"/>
+    <path d="M158,237 L122,237" marker-start="url(#ah)" marker-end="url(#ah)"/>
+  </g>
+  <text x="250" y="160" font-size="10.5" fill="#4a5058" text-anchor="end">walls (peek)</text>
+</svg>
+<figcaption>Data flows left to right on top (sensors → motion → motors). The app commands the motion task through the queue and learns the outcome through the status mailbox and event bits. The dashed arrow is the app peeking the snapshot to read walls.</figcaption>
+</figure>
+<div class="key"><b>The one sentence.</b> Split the work into tasks that block until their moment, let the scheduler always run the most urgent ready task, and connect the tasks only through queues, mailboxes and event bits.</div>
+</div></div>
+<div class="pn" id="pn"></div>
+</main>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#111"/></marker>
+<marker id="aho" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#e8590c"/></marker>
+<marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f9e44"/></marker>
+</defs></svg>
+<script src="assets/course.js"></script>
+<script>nav('index');</script>
+</body></html>

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>6. Mailbox: the latest value · FreeRTOS, the Hard Way</title><link rel="stylesheet" href="assets/course.css"></head><body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#111"/></marker>
+<marker id="aho" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#e8590c"/></marker>
+<marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f9e44"/></marker>
+</defs></svg>
+<main>
+<p class="sub" style="margin:0 0 4px">FreeRTOS, the Hard Way · 6 / 11</p>
+<h1>6. Mailbox: the latest value <span class="sl">main/app_ipc.c:58</span></h1>
+<p class="lead">Commands must all arrive; sensor state only needs to be fresh. Same queue, used differently.</p>
+<nav id="nav"></nav>
+
+<section>
+<h2>Build it from first principles</h2>
+<div class="split"><div>
+<h3>Two kinds of data</h3>
+<p>An <b>event</b> or command counts every time: skipping "stop" is a bug. A <b>state</b> only matters in its latest version: a reader that wants the robot's position does not want the position of 30 ms ago.</p>
+<h3>What a queue does to state</h3>
+<p>Put 100 snapshots per second in a normal queue and the reader gets the oldest first, so it lags; if it reads slower than 100 Hz, the queue fills and the sensor blocks or drops new data.</p>
+<h3>The mailbox</h3>
+<p>Make the queue one slot long. The writer replaces the slot with <code>xQueueOverwrite</code> (never blocks); readers copy it with <code>xQueuePeek</code>, which does not remove it, so any number of tasks can read the same value.</p>
+<pre>QueueHandle_t snap_q = xQueueCreate(1, sizeof(sensor_snapshot_t));
+
+xQueueOverwrite(snap_q, &amp;snap);   // sensor task: replace
+xQueuePeek(snap_q, &amp;copy, 0);     // any reader: copy, keep</pre>
+</div><div><figure>
+<svg viewBox="0 0 680 190" role="img" aria-label="Queue versus mailbox">
+  <g font-size="12.5">
+    <text x="10" y="30" font-weight="700">Queue (length 3)</text>
+    <text x="10" y="46" fill="#4a5058" font-size="11">every value, once</text>
+    <rect x="200" y="14" width="56" height="36" fill="#f4f2ee" stroke="#111"/><text x="228" y="37" text-anchor="middle">s3</text>
+    <rect x="256" y="14" width="56" height="36" fill="#f4f2ee" stroke="#111"/><text x="284" y="37" text-anchor="middle">s2</text>
+    <rect x="312" y="14" width="56" height="36" fill="#f4f2ee" stroke="#111"/><text x="340" y="37" text-anchor="middle">s1</text>
+    <text x="420" y="29">xQueueReceive → s1</text>
+    <text x="420" y="45" fill="#4a5058" font-size="11">s1 is removed; next receive gets s2</text>
+
+    <text x="10" y="120" font-weight="700">Mailbox (length 1)</text>
+    <text x="10" y="136" fill="#4a5058" font-size="11">latest value, any number of times</text>
+    <text x="200" y="100" fill="#4a5058" font-size="11">s1 → s2 → s3: each xQueueOverwrite replaces it</text>
+    <rect x="256" y="106" width="56" height="36" fill="#fff" stroke="#2f9e44" stroke-width="2"/><text x="284" y="129" text-anchor="middle" font-weight="700">s3</text>
+    <text x="420" y="118">xQueuePeek → s3 (motion)</text>
+    <text x="420" y="136">xQueuePeek → s3 (app)</text>
+    <text x="420" y="152" fill="#4a5058" font-size="11">peek copies without removing</text>
+  </g>
+  <g fill="none" stroke="#111" stroke-width="1.4"><path d="M368,32 L414,32" marker-end="url(#ah)"/><path d="M312,124 L414,124" marker-end="url(#ah)"/></g>
+  <text x="340" y="182" text-anchor="middle" font-size="11" fill="#4a5058">same xQueueCreate, used two ways</text>
+</svg>
+<figcaption>Top: a queue delivers every sample once, oldest first. Bottom: a mailbox keeps only the newest sample, and any task can read it as often as it wants.</figcaption>
+</figure></div></div>
+</section>
+
+<section>
+<h2>Why these values</h2>
+<div class="split"><div>
+<div class="why"><b>Why length 1, exactly?</b> <code>xQueueOverwrite</code> is only defined for a queue of length 1: "overwrite" means "replace the one item". With more slots there would be no single latest value to replace.</div>
+<div class="why"><b>How much does a read cost?</b> <code>sizeof(sensor_snapshot_t)</code> = 32 bytes (3 ToF distances, yaw, yaw rate, 2 encoder counts, a timestamp). Copying 32 bytes under the queue's internal lock takes well under a microsecond.</div>
+</div><div>
+<div class="why"><b>And the status mailbox?</b> <code>sizeof(motion_status_t)</code> = 40 bytes: state, progress, target and the 28-byte report of the last move. The app peeks it whenever it needs progress or a result.</div>
+</div></div>
+</section>
+
+<section>
+<div class="key"><b>To remember.</b> State goes in a mailbox (latest value wins); commands and events go in a queue (every value counts). Mailbox = length-1 queue + <code>xQueueOverwrite</code> + <code>xQueuePeek</code>.</div>
+<div class="anchor"><b>In micro_farr.</b> <code>main/app_ipc.c:5,40,58,66</code>: the snapshot mailbox, read by motion and app. <code>main/app_ipc.c:74,82</code>: the motion status mailbox.</div>
+<details><summary>Deep dive: what a mailbox cannot tell you</summary>
+<p>A peek returns the newest value but not whether it is new <b>since your last read</b>: two peeks 1 ms apart return the same snapshot. That is why the motion task does not poll the mailbox. It waits for a "new sample" signal (page 7), so every control step uses fresh data exactly once.</p>
+</details>
+</section>
+<div class="pn" id="pn"></div>
+</main>
+<script src="assets/course.js"></script>
+<script>nav('mailbox');</script>
+</body></html>

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>11. Synthesis · FreeRTOS, the Hard Way</title><link rel="stylesheet" href="assets/course.css"></head><body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#111"/></marker>
+<marker id="aho" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#e8590c"/></marker>
+<marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f9e44"/></marker>
+</defs></svg>
+<main>
+<p class="sub" style="margin:0 0 4px">FreeRTOS, the Hard Way · 11 / 11</p>
+<h1>11. Synthesis <span class="sl">cheat sheet</span></h1>
+<p class="lead">Every API of the course on one page, and the ten rules behind micro_farr.</p>
+<nav id="nav"></nav>
+
+<section>
+<div class="split even"><div>
+<h2>API cheat sheet</h2>
+<div class="scroll"><table>
+<tr><th>Need</th><th>FreeRTOS API</th><th>In micro_farr</th></tr>
+<tr><td>Start a task on a core</td><td><code>xTaskCreatePinnedToCore(fn, name, bytes, arg, prio, &amp;h, core)</code></td><td>3 tasks, <code>main.c:74-76</code></td></tr>
+<tr><td>Run every N ms</td><td><code>vTaskDelayUntil(&amp;last, pdMS_TO_TICKS(N))</code></td><td>sensor loop</td></tr>
+<tr><td>Wait at least N ms</td><td><code>vTaskDelay(pdMS_TO_TICKS(N))</code></td><td>explore: settle before reading walls</td></tr>
+<tr><td>Commands, every one counts</td><td><code>xQueueCreate</code> · <code>xQueueSend</code> · <code>xQueueReceive</code></td><td>motion command queue</td></tr>
+<tr><td>Latest state</td><td>length-1 queue · <code>xQueueOverwrite</code> · <code>xQueuePeek</code></td><td>snapshot, status</td></tr>
+<tr><td>"It happened"</td><td><code>xEventGroupSetBits</code> · <code>xEventGroupWaitBits</code></td><td>SENSOR_NEW, MOVE_DONE, MOVE_FAULT</td></tr>
+<tr><td>Wake one known task</td><td><code>xTaskNotifyGive</code> · <code>ulTaskNotifyTake</code></td><td>alternative to SENSOR_NEW</td></tr>
+<tr><td>Protect shared data</td><td><code>xSemaphoreCreateMutex</code> · <code>Take</code> / <code>Give</code></td><td>avoided: one owner per resource</td></tr>
+<tr><td>Tiny critical section, 2 cores</td><td><code>portENTER_CRITICAL(&amp;mux)</code> / <code>portEXIT_CRITICAL</code></td><td>inside FreeRTOS queues</td></tr>
+<tr><td>Measure stack use</td><td><code>uxTaskGetStackHighWaterMark(NULL)</code></td><td>sizing <code>*_TASK_STACK</code></td></tr>
+</table></div>
+</div><div>
+<h2>Ten rules</h2>
+<ol>
+<li>Every task blocks in every loop pass.</li>
+<li>Priority follows the deadline, not the importance.</li>
+<li>Periodic means <code>vTaskDelayUntil</code>.</li>
+<li>Never busy-poll a flag: block on a queue, bit or notification.</li>
+<li>Pass data by copy through queues; no globals between tasks.</li>
+<li>State in a mailbox, commands in a queue, events in bits.</li>
+<li>Clear result bits before starting what you will wait for.</li>
+<li>One owner per resource; if you must share, use a short mutex.</li>
+<li>Stack sizes are in bytes on ESP-IDF: measure them.</li>
+<li>Pin the control loop to its own core; write flash only when the robot is still.</li>
+</ol>
+<h2>Project numbers used in the course</h2>
+<div class="scroll"><table>
+<tr><th>Value</th><th>Where</th></tr>
+<tr><td>tick 1000 Hz</td><td><code>sdkconfig CONFIG_FREERTOS_HZ</code></td></tr>
+<tr><td>sensor 100 Hz, prio 9, core 1, 4096 B</td><td><code>app_config.h:39-44</code></td></tr>
+<tr><td>motion prio 10, core 1, 4096 B, sensor timeout 50 ms</td><td><code>app_config.h:41-45, 111</code></td></tr>
+<tr><td>app prio 3, core 0, 8192 B, UI poll 50 ms</td><td><code>app_config.h:46-48</code></td></tr>
+<tr><td>queue 4 × 12 B; mailboxes 32 B and 40 B</td><td><code>app_ipc.c:5-6, 40-42</code></td></tr>
+<tr><td>task watchdog 5 s on both idle tasks</td><td><code>sdkconfig CONFIG_ESP_TASK_WDT_*</code></td></tr>
+</table></div>
+</div></div>
+</section>
+<div class="pn" id="pn"></div>
+</main>
+<script src="assets/course.js"></script>
+<script>nav('synth');</script>
+</body></html>

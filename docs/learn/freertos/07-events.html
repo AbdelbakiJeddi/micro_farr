@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>7. Event groups and notifications · FreeRTOS, the Hard Way</title><link rel="stylesheet" href="assets/course.css"></head><body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#111"/></marker>
+<marker id="aho" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#e8590c"/></marker>
+<marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f9e44"/></marker>
+</defs></svg>
+<main>
+<p class="sub" style="margin:0 0 4px">FreeRTOS, the Hard Way · 7 / 11</p>
+<h1>7. Event groups and notifications <span class="sl">main/app_ipc.h:12</span></h1>
+<p class="lead">Some messages carry no data, only the fact that something happened.</p>
+<nav id="nav"></nav>
+
+<section>
+<h2>Build it from first principles</h2>
+<div class="split"><div>
+<h3>A word of flags</h3>
+<p>An <b>event group</b> is one integer whose bits are flags, plus a list of tasks waiting on it. Each waiter states its condition: which bits, <b>any</b> or <b>all</b> of them, and whether to clear them when it wakes.</p>
+<h3>Setting re-checks the waiters</h3>
+<p>Every <code>xEventGroupSetBits</code> walks the waiting list and wakes each task whose condition is now true. Several tasks can wait on the same bit; all of them wake.</p>
+<h3>A bit is memory</h3>
+<p>A bit stays set until someone clears it, even if nobody was waiting when it was set. That is useful (a late waiter still sees the event) and dangerous (a waiter may see an <b>old</b> event).</p>
+<pre>EventBits_t b = xEventGroupWaitBits(ev,
+        MOVE_DONE | MOVE_FAULT,
+        pdTRUE,    // clear these bits on exit
+        pdFALSE,   // ANY bit, not all
+        pdMS_TO_TICKS(7000));
+if (b &amp; MOVE_DONE)  { /* done */ }
+else if (b == 0)    { /* timeout */ }</pre>
+</div><div><figure>
+<svg viewBox="0 0 700 200" role="img" aria-label="Event group bits with setters and waiters">
+  <g font-size="12">
+    <text x="20" y="22" fill="#4a5058">set by</text>
+    <text x="85" y="22" text-anchor="middle">main</text>
+    <text x="300" y="22" text-anchor="middle">motion task</text>
+    <text x="505" y="22" text-anchor="middle">sensor task</text>
+    <rect x="30" y="78" width="110" height="38" fill="#fff" stroke="#111"/><text x="85" y="96" text-anchor="middle" font-size="11">bit 0</text><text x="85" y="110" text-anchor="middle" font-size="11" font-weight="700">CALIBRATED</text>
+    <rect x="140" y="78" width="110" height="38" fill="#fff" stroke="#111"/><text x="195" y="96" text-anchor="middle" font-size="11">bit 1</text><text x="195" y="110" text-anchor="middle" font-size="11" font-weight="700">MOVE_DONE</text>
+    <rect x="250" y="78" width="110" height="38" fill="#fff" stroke="#111"/><text x="305" y="96" text-anchor="middle" font-size="11">bit 2</text><text x="305" y="110" text-anchor="middle" font-size="11" font-weight="700">MOVE_FAULT</text>
+    <rect x="450" y="78" width="110" height="38" fill="#fff" stroke="#111"/><text x="505" y="96" text-anchor="middle" font-size="11">bit 3</text><text x="505" y="110" text-anchor="middle" font-size="11" font-weight="700">SENSOR_NEW</text>
+    <rect x="560" y="78" width="120" height="38" fill="#f4f2ee" stroke="#111"/><text x="620" y="102" text-anchor="middle" font-size="11" fill="#4a5058">bits 4–23 free</text>
+    <text x="20" y="190" fill="#4a5058">waited by</text>
+    <text x="245" y="180" text-anchor="middle">app task: MOVE_DONE | MOVE_FAULT</text>
+    <text x="505" y="180" text-anchor="middle">motion task: SENSOR_NEW</text>
+  </g>
+  <g fill="none" stroke="#111" stroke-width="1.4">
+    <path d="M85,28 L85,76" marker-end="url(#ah)"/>
+    <path d="M280,28 L205,76" marker-end="url(#ah)"/><path d="M320,28 L305,76" marker-end="url(#ah)"/>
+    <path d="M505,28 L505,76" marker-end="url(#ah)"/>
+    <path d="M195,116 L230,164" marker-end="url(#ah)"/><path d="M305,116 L265,164" marker-end="url(#ah)"/>
+    <path d="M505,116 L505,164" marker-end="url(#ah)"/>
+  </g>
+</svg>
+<figcaption>micro_farr's single event group. Each bit is a fact that something happened; a waiter wakes when any (or all) of its bits are set.</figcaption>
+</figure></div></div>
+</section>
+
+<section>
+<h2>Break it: a stale bit</h2>
+<div class="split"><div>
+<p>The app sent move 1, then stopped waiting (a timeout, or the operator pressed DEC). Move 1 ends later and sets MOVE_DONE with nobody listening. The app now sends move 2 and waits.</p>
+<p>Without clearing first, the wait is satisfied by the old bit: the app believes move 2 is done while the robot is still driving, and its next command is rejected as "motion busy".</p>
+<div class="legend" aria-label="Timeline colours"><span><i style="background:#343a40"></i>running</span><span><i style="background:#e4e1da"></i>ready or blocked, not running</span><span><i style="background:#e8590c"></i>problem: blocked too long, lost, late</span><span><i style="background:#2f9e44"></i>done / on time</span></div>
+</div><div><div id="tl-events"></div></div></div>
+</section>
+
+<section>
+<h2>Why these values</h2>
+<div class="split"><div>
+<div class="why"><b>Why at most 24 bits?</b> With 32-bit ticks, an ESP-IDF event group holds 32 bits, but the kernel reserves the top 8 for its own control flags. micro_farr uses 4 of the 24.</div>
+<div class="why"><b>Why "any", not "all"?</b> A move ends either done or faulted, never both. Waiting for any of the two wakes the app in both cases with one call.</div>
+</div><div>
+<div class="why"><b>Why clear on exit <i>and</i> clear before sending?</b> Clear-on-exit consumes the bit when someone was waiting. Clear-before-send covers the case where nobody was. Both are needed.</div>
+<div class="why"><b>Why a bit for SENSOR_NEW and not a notification?</b> Either works with one receiver. An event bit kept every inter-task channel inside <code>app_ipc</code> with one mechanism; a notification would be a little faster.</div>
+</div></div>
+</section>
+
+<section>
+<div class="key"><b>To remember.</b> A bit remembers that something happened, even when nobody was listening. Clear the result bits <b>before</b> you start the action you are going to wait for.</div>
+<div class="anchor"><b>In micro_farr.</b> <code>main/app_ipc.h:12-15</code>: the four bits. <code>main/app/motion_client.c:15-17</code>: <code>send_new_move()</code> clears MOVE_DONE and MOVE_FAULT, then queues the command. <code>main/app/motion_client.c:52</code>: <code>motion_wait()</code>. <code>main/app_ipc.c:126-131</code> and <code>motion_task.c:424</code>: SENSOR_NEW, waited with a 50 ms timeout.</div>
+<details><summary>Deep dive: task notifications</summary>
+<p>Every task has a built-in 32-bit notification value. <code>xTaskNotifyGive(handle)</code> and <code>ulTaskNotifyTake(pdTRUE, timeout)</code> act like a counting semaphore with no object to create, and are the fastest signal FreeRTOS has. The limit: one receiver, known by its handle.</p>
+<p>Setting event bits from an interrupt (<code>xEventGroupSetBitsFromISR</code>) is deferred to the timer service task, because walking the waiting list is too long for an ISR. A notification from an ISR is immediate.</p>
+</details>
+</section>
+<div class="pn" id="pn"></div>
+</main>
+<script src="assets/course.js"></script>
+<script>nav('events');
+mount('tl-events', {
+  label: 'Event bit timeline', sim: s => SIM.events({ clear: s.clear === 'yes' }), init: { clear: 'no' },
+  toggles: [{ key: 'clear', label: 'Clear bits before sending move 2', options: [['no', 'No'], ['yes', 'Yes']] }],
+  predict: { q: 'The app gave up waiting for move 1, which ended later. It sends move 2 without clearing the bits. When does its wait for move 2 return?',
+    choices: [['17', 'at once (17 ms)'], ['29', 'when move 2 ends (29 ms)'], ['never', 'never']], whenText: '“No”',
+    label: v => ({ 17: 'at once (17 ms)', 29: 'when move 2 ends (29 ms)', never: 'never' }[v]),
+    when: s => s.clear === 'no',
+    why: 'The MOVE_DONE bit from move 1 was still set, so the wait was satisfied before move 2 began.' } });</script>
+</body></html>

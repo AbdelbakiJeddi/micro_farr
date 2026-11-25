@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>1. Why an RTOS · FreeRTOS, the Hard Way</title><link rel="stylesheet" href="assets/course.css"></head><body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#111"/></marker>
+<marker id="aho" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#e8590c"/></marker>
+<marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f9e44"/></marker>
+</defs></svg>
+<main>
+<p class="sub" style="margin:0 0 4px">FreeRTOS, the Hard Way · 1 / 11</p>
+<h1>1. Why an RTOS <span class="sl">main/main.c:74</span></h1>
+<p class="lead">One slow job can make a fast job late. A scheduler fixes that by interrupting the slow job.</p>
+<nav id="nav"></nav>
+
+<section>
+<h2>The problem</h2>
+<div class="split"><div>
+<p>A micromouse runs three kinds of jobs at very different speeds. Each job has a <b>period</b> (how often it must run), a <b>cost</b> (how long it takes) and a <b>deadline</b> (when it must be finished).</p>
+<p>The OLED is the trap: its cost is longer than the sensor period.</p>
+</div><div>
+<div class="scroll"><table>
+<tr><th>Job</th><th>Period</th><th>Cost</th><th>Deadline</th></tr>
+<tr><td>Read sensors</td><td>10 ms</td><td>2 ms</td><td>before the next sample</td></tr>
+<tr><td>Control law → motors</td><td>every sample</td><td>1 ms</td><td>before the next sample</td></tr>
+<tr><td>Redraw the OLED</td><td>when needed</td><td>≈ 23 ms</td><td>a human glance (~100 ms)</td></tr>
+</table></div>
+<p class="small">Costs are simplified round numbers for the lesson; the OLED cost is computed below.</p>
+</div></div>
+</section>
+
+<section>
+<h2>Build it from first principles</h2>
+<div class="split"><div>
+<h3>Step 1: one CPU, one instruction at a time</h3>
+<p>A core executes one instruction stream. "Doing three jobs" means <b>interleaving</b> them: the only question is where you are allowed to switch.</p>
+<h3>Step 2: the super-loop switches only between jobs</h3>
+<p>A <code>while (1)</code> loop runs each job to the end, then the next. A new sample that arrives mid-OLED waits for the whole pass:</p>
+<div class="eq">worst reaction  R = C_sensor + C_control + C_oled
+                  = 2 + 1 + 25 = 28 ms   &gt;  10 ms deadline</div>
+<h3>Step 3: switch in the middle of a job</h3>
+<p>To react faster, the CPU must be able to stop the OLED code anywhere. A hardware interrupt can do that. The RTOS then saves the registers of the stopped job (its <b>context</b>) and loads another job's registers. That is <b>preemption</b>.</p>
+<h3>Step 4: every job needs its own stack</h3>
+<p>A stopped job still has local variables and return addresses in flight. They must stay intact until it resumes, so each job gets a private <b>stack</b>. Function + stack + saved context + priority = a <b>task</b>.</p>
+<h3>Step 5: the urgent job no longer depends on the slow one</h3>
+<div class="eq">R_control = C_control + switch time ≈ 1 ms + a few µs</div>
+<p>The OLED still takes 25 ms of CPU, but it now runs in the gaps.</p>
+</div><div>
+<div class="cols">
+<div><div class="ct">Super-loop</div>
+<pre>void app_main(void)
+{
+    while (1) {
+        read_sensors();      // 2 ms
+        control();           // 1 ms
+        if (oled_due())
+            <span class="hl">oled_draw();     // 25 ms</span>
+        wait_next_10ms();
+    }
+}</pre></div>
+<div><div class="ct">FreeRTOS tasks</div>
+<pre>void app_main(void)
+{
+  // fn, name, stack, arg, prio, handle
+  xTaskCreate(control_task, "ctrl",
+              4096, NULL, 3, NULL);
+  xTaskCreate(sensor_task, "sens",
+              4096, NULL, 2, NULL);
+  xTaskCreate(oled_task, "oled",
+              4096, NULL, 1, NULL);
+}</pre></div>
+</div>
+</div></div>
+</section>
+
+<section>
+<h2>Break it</h2>
+<div class="split"><div>
+<p>Same three jobs, 60 ms of CPU time, one cell per millisecond. The OLED wants a redraw at 3 ms and 33 ms.</p>
+<p>In the super-loop, each <code>oled_draw()</code> hides the next two samples. With tasks, the sample at 10 ms arrives while the OLED draws: the scheduler stops the OLED task, runs sensor and control, then lets the OLED finish later.</p>
+<div class="legend" aria-label="Timeline colours"><span><i style="background:#343a40"></i>running</span><span><i style="background:#e4e1da"></i>ready or blocked, not running</span><span><i style="background:#e8590c"></i>problem: blocked too long, lost, late</span><span><i style="background:#2f9e44"></i>done / on time</span></div>
+</div><div><div id="tl-why"></div></div></div>
+</section>
+
+<section>
+<h2>Why these values</h2>
+<div class="split"><div>
+<div class="why"><b>Why does the OLED take 23 ms?</b> A full frame is 128 × 64 pixels / 8 = 1024 bytes. On I2C every byte costs 9 clock bits (8 data + 1 acknowledge). At 400 kHz: 1024 × 9 / 400 000 = <b>23.04 ms</b>, before any protocol overhead. A faster bus would shrink it, not remove it.</div>
+<div class="why"><b>Why sample at 100 Hz?</b> At 450 mm/s the robot moves 4.5 mm per sample, fine enough for the wheel speed loops. Faster would load the I2C bus that also carries the IMU, three ToF sensors and the OLED.</div>
+</div><div>
+<div class="why"><b>Why redraw only at 10 Hz?</b> One frame holds the shared I2C bus for 23 ms. At 10 Hz that is 23 % of the bus time; at 20 Hz it would be 46 %, and every ToF and IMU read would wait behind it more often.</div>
+<div class="why"><b>Is the 10 ms deadline real?</b> Yes: the next sample overwrites the previous one. A control step that runs late either uses stale data or is skipped.</div>
+</div></div>
+</section>
+
+<section>
+<div class="key"><b>To remember.</b> A super-loop reacts no faster than its longest job. An RTOS always runs the most urgent task that is ready, and preempts anything less urgent.</div>
+<div class="anchor"><b>In micro_farr.</b> <code>main/main.c:74-76</code> starts three tasks: sensor, motion, app. <code>main/app_config.h:39-48</code> holds their rates, cores, priorities and stacks. The OLED lives in the lowest-priority task, and <code>draw_status()</code> in <code>main/app/state_explore.c</code> throttles it to 10 Hz.</div>
+<details><summary>Deep dive: could a super-loop do this too?</summary>
+<p>Yes, by hand: cut <code>oled_draw()</code> into 8 page writes of 3 ms and send one per pass. That is <b>cooperative multitasking</b>: you must chop every slow job yourself, and one forgotten long call breaks the timing again.</p>
+<p>An RTOS chops for you. The price: one stack per task (RAM), a few microseconds per switch, and data shared between tasks that can be read half-updated (page 8).</p>
+<p>On ESP-IDF there is no bare super-loop anyway: <code>app_main()</code> already runs inside a FreeRTOS task called <code>main</code> (core 0, 3584-byte stack in this project's <code>sdkconfig</code>).</p>
+</details>
+</section>
+<div class="pn" id="pn"></div>
+</main>
+<script src="assets/course.js"></script>
+<script>nav('why');
+mount('tl-why', {
+  label: 'CPU timeline, super-loop versus RTOS', sim: s => SIM.why({ sched: s.sched, oled: s.oled === 'on' }), init: { sched: 'super', oled: 'on' },
+  toggles: [
+    { key: 'sched', label: 'Scheduler', options: [['super', 'Super-loop'], ['rtos', 'RTOS']] },
+    { key: 'oled', label: 'OLED redraw', options: [['on', 'On'], ['off', 'Off']] }],
+  predict: { q: 'Super-loop, OLED redraw on. Over 60 ms there are 6 control deadlines, one per 10 ms sample. How many are missed?',
+    choices: [['0', '0'], ['2', '2'], ['4', '4'], ['6', '6']], whenText: 'Super-loop and OLED on', label: v => v,
+    when: s => s.sched === 'super' && s.oled === 'on',
+    why: 'Each 25 ms oled_draw() swallows the next two samples. Switch to RTOS: 0 missed.' } });</script>
+</body></html>

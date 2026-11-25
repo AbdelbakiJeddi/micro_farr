@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>2. Tasks: create, stack, states · FreeRTOS, the Hard Way</title><link rel="stylesheet" href="assets/course.css"></head><body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#111"/></marker>
+<marker id="aho" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#e8590c"/></marker>
+<marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f9e44"/></marker>
+</defs></svg>
+<main>
+<p class="sub" style="margin:0 0 4px">FreeRTOS, the Hard Way · 2 / 11</p>
+<h1>2. Tasks: create, stack, states <span class="sl">main/tasks/sensor_task.c:90</span></h1>
+<p class="lead">A task is a function that never returns, plus a private stack, a priority and a state.</p>
+<nav id="nav"></nav>
+
+<section>
+<h2>The problem</h2>
+<p>Page 1 said "each job gets its own stack and saved context". What does that look like in memory, and how does the RTOS know which task may run?</p>
+</section>
+
+<section>
+<h2>Build it from first principles</h2>
+<div class="split"><div>
+<h3>The task control block</h3>
+<p>For every task the kernel keeps a small record, the <b>TCB</b>: priority, current state, name, the core it may run on, and the saved stack pointer. The TCB is how the scheduler sees a task.</p>
+<h3>The stack holds the paused task</h3>
+<p>While a task is not running, its registers sit at the top of its own stack. Only the stack pointer is stored in the TCB, so a switch is cheap: a few dozen registers pushed and popped.</p>
+<h3>Five steps per switch</h3>
+<p>① push the running task's registers, ② store its SP in its TCB, ③ choose the next task, ④ load that task's SP, ⑤ pop its registers. The CPU continues inside the other task as if it had never left.</p>
+</div><div><figure>
+<svg viewBox="0 0 700 250" role="img" aria-label="Context switch between two tasks">
+  <g font-size="12.5">
+    <rect x="270" y="8" width="160" height="58" rx="8" fill="#fff" stroke="#111" stroke-width="1.6"/>
+    <text x="350" y="31" text-anchor="middle" font-weight="700">CPU core</text><text x="350" y="50" text-anchor="middle" font-size="11.5">PC · SP · registers</text>
+    <rect x="30" y="112" width="200" height="50" rx="8" fill="#fff" stroke="#111" stroke-width="1.4"/>
+    <text x="130" y="132" text-anchor="middle" font-weight="700">TCB of task A</text><text x="130" y="150" text-anchor="middle" font-size="11">prio · state · saved SP</text>
+    <rect x="30" y="170" width="200" height="34" fill="#f4f2ee" stroke="#111"/><text x="130" y="192" text-anchor="middle" font-size="11">A's locals, return addresses</text>
+    <rect x="30" y="204" width="200" height="30" fill="#fff4ec" stroke="#e8590c"/><text x="130" y="224" text-anchor="middle" font-size="11" fill="#e8590c" font-weight="700">A's saved registers</text>
+    <rect x="470" y="112" width="200" height="50" rx="8" fill="#fff" stroke="#2f9e44" stroke-width="2"/>
+    <text x="570" y="132" text-anchor="middle" font-weight="700">TCB of task B</text><text x="570" y="150" text-anchor="middle" font-size="11">highest-priority Ready</text>
+    <rect x="470" y="170" width="200" height="34" fill="#f4f2ee" stroke="#111"/><text x="570" y="192" text-anchor="middle" font-size="11">B's locals, return addresses</text>
+    <rect x="470" y="204" width="200" height="30" fill="#ebfbee" stroke="#2f9e44"/><text x="570" y="224" text-anchor="middle" font-size="11" fill="#2f9e44" font-weight="700">B's saved registers</text>
+  </g>
+  <g fill="none" stroke-width="1.6">
+    <path d="M285,66 C240,120 240,190 232,214" stroke="#e8590c" marker-end="url(#aho)"/>
+    <path d="M468,214 C460,190 460,120 415,68" stroke="#2f9e44" marker-end="url(#ahg)"/>
+  </g>
+  <g font-size="11.5">
+    <text x="262" y="118" text-anchor="end" fill="#e8590c">① push A's</text><text x="262" y="132" text-anchor="end" fill="#e8590c">registers</text>
+    <text x="350" y="100" text-anchor="middle">② save SP in A's TCB</text>
+    <text x="350" y="116" text-anchor="middle">③ pick B</text>
+    <text x="350" y="132" text-anchor="middle">④ load B's SP</text>
+    <text x="440" y="118" fill="#2f9e44">⑤ pop B's</text><text x="440" y="132" fill="#2f9e44">registers</text>
+  </g>
+</svg>
+<figcaption>A context switch. The CPU's registers are pushed onto the stopped task's own stack, its stack pointer is stored in its TCB (task control block), and the next task's registers are popped from its stack. Each task resumes exactly where it stopped.</figcaption>
+</figure></div></div>
+</section>
+
+<section>
+<h2>The four states</h2>
+<div class="split"><div>
+<p>The state field of the TCB answers "may this task run now?"</p>
+<ul class="pts">
+<li><b>Running</b>: on a core right now (one per core).</li>
+<li><b>Ready</b>: wants the CPU, waits for a higher-priority task to stop.</li>
+<li><b>Blocked</b>: waits for time, data or an event. Costs no CPU at all.</li>
+<li><b>Suspended</b>: paused by hand with <code>vTaskSuspend()</code>. Rarely needed.</li>
+</ul>
+<p>The key move is <b>Running → Blocked</b>. A task that never blocks never gives the CPU to anything below it.</p>
+</div><div><figure>
+<svg viewBox="0 0 720 260" role="img" aria-label="Task state machine">
+  <g font-size="13">
+    <rect x="40" y="96" width="130" height="44" rx="8" fill="#fff" stroke="#111" stroke-width="1.6"/><text x="105" y="123" text-anchor="middle" font-weight="700">Ready</text>
+    <rect x="480" y="96" width="150" height="44" rx="8" fill="#fff" stroke="#2f9e44" stroke-width="2.4"/><text x="555" y="123" text-anchor="middle" font-weight="700" fill="#2f9e44">Running</text>
+    <rect x="270" y="196" width="150" height="44" rx="8" fill="#f4f2ee" stroke="#111" stroke-width="1.6"/><text x="345" y="223" text-anchor="middle" font-weight="700">Blocked</text>
+    <rect x="270" y="8" width="150" height="40" rx="8" fill="#fff" stroke="#4a5058" stroke-width="1.4" stroke-dasharray="5 4"/><text x="345" y="33" text-anchor="middle" font-weight="700" fill="#4a5058">Suspended</text>
+  </g>
+  <g fill="none" stroke="#111" stroke-width="1.5">
+    <path d="M170,108 L478,108" marker-end="url(#ah)"/>
+    <path d="M480,130 L172,130" marker-end="url(#ah)"/>
+    <path d="M560,140 L420,206" marker-end="url(#ah)"/>
+    <path d="M270,222 L110,142" marker-end="url(#ah)"/>
+    <path d="M500,96 L410,48" stroke="#4a5058" stroke-dasharray="5 4" marker-end="url(#ah)"/>
+    <path d="M280,40 L140,96" stroke="#4a5058" stroke-dasharray="5 4" marker-end="url(#ah)"/>
+  </g>
+  <g font-size="11.5" fill="#111">
+    <text x="324" y="101" text-anchor="middle">scheduler picks it (highest priority ready)</text>
+    <text x="324" y="148" text-anchor="middle">preempted by a higher priority, or taskYIELD()</text>
+    <text x="510" y="188">vTaskDelay(), xQueueReceive(),</text>
+    <text x="510" y="203">xSemaphoreTake(), wait bits…</text>
+    <text x="40" y="200">data, event or</text>
+    <text x="40" y="215">timeout arrives</text>
+    <text x="470" y="62" fill="#4a5058">vTaskSuspend()</text>
+    <text x="120" y="62" fill="#4a5058">vTaskResume()</text>
+  </g>
+</svg>
+<figcaption>Only one task per core is <b>Running</b>. <b>Ready</b> tasks want the CPU. <b>Blocked</b> tasks wait for time or an event and cost no CPU at all. <b>Suspended</b> is a manual pause, rarely needed.</figcaption>
+</figure></div></div>
+</section>
+
+<section>
+<h2>Minimal code</h2>
+<div class="split"><div>
+<pre>static void sensor_task(void *arg)
+{
+    TickType_t last_wake = xTaskGetTickCount();
+    while (1) {                          // never return
+        read_and_publish();
+        vTaskDelayUntil(&amp;last_wake,
+                        pdMS_TO_TICKS(10));  // Blocked
+    }
+}
+
+xTaskCreatePinnedToCore(sensor_task, "sensor",
+                        4096,  // stack, BYTES on ESP-IDF
+                        NULL,  // argument
+                        9,     // priority, higher = more urgent
+                        NULL,  // handle (optional)
+                        1);    // core</pre>
+</div><div>
+<div class="why"><b>Why 4096 bytes for sensor and motion?</b> A round size with margin over what their loops use. The real check is <code>uxTaskGetStackHighWaterMark(NULL)</code> after the worst case: it returns the smallest free space ever left.</div>
+<div class="why"><b>Why 8192 bytes for the app task?</b> The speed-run planner keeps its search arrays on the stack: 256 B of parents, 1024 B of directions, 512 B of BFS queue, 256 B of visited flags, about 2 KB, plus <code>snprintf</code> buffers for the OLED. The 787-byte maze is <code>static</code>, kept off every stack.</div>
+<div class="why"><b>Why priorities 10, 9 and 3, and not 24?</b> ESP-IDF allows 0–24. Its own service tasks sit high: the <code>esp_timer</code> task at 22, the inter-core IPC tasks at 24. Keeping application tasks well below lets those services preempt us when they must. Only the <b>order</b> of our priorities matters, not the gaps.</div>
+</div></div>
+</section>
+
+<section>
+<div class="key"><b>To remember.</b> A task = function + stack + TCB. It must reach a blocking call in every loop pass: blocking is what hands the CPU to everyone below it.</div>
+<div class="anchor"><b>In micro_farr.</b> <code>main/tasks/sensor_task.c:67-90</code>: the task loop and its creation, pinned to core 1. <code>main/app_config.h:44-48</code>: stacks 4096 / 4096 / 8192. <code>main/app/app_task.c:20</code> and <code>main/app/maze_store.c:29</code>: big objects kept <code>static</code>.</div>
+<details><summary>Deep dive: bytes, overflow, the end of a task</summary>
+<p><b>Bytes, not words.</b> Vanilla FreeRTOS counts stack depth in words of 4 bytes. ESP-IDF counts in bytes. Code copied from a FreeRTOS tutorial gets 4× less stack on ESP-IDF.</p>
+<p><b>Overflow.</b> ESP-IDF detects most overflows and panics with <code>A stack overflow in task … has been detected</code>. Silent corruption is still possible with large local arrays: measure the high-water mark.</p>
+<p><b>Never return.</b> Returning from a task function aborts the program on ESP-IDF. A task that has finished calls <code>vTaskDelete(NULL)</code>.</p>
+</details>
+</section>
+<div class="pn" id="pn"></div>
+</main>
+<script src="assets/course.js"></script>
+<script>nav('tasks');</script>
+</body></html>

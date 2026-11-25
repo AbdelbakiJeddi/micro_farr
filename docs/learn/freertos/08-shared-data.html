@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>8. Shared data: races, mutexes, inversion · FreeRTOS, the Hard Way</title><link rel="stylesheet" href="assets/course.css"></head><body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#111"/></marker>
+<marker id="aho" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#e8590c"/></marker>
+<marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f9e44"/></marker>
+</defs></svg>
+<main>
+<p class="sub" style="margin:0 0 4px">FreeRTOS, the Hard Way · 8 / 11</p>
+<h1>8. Shared data: races, mutexes, inversion <span class="sl">main/params.c:35</span></h1>
+<p class="lead">Preemption can stop a task between any two instructions. Shared data has to survive that.</p>
+<nav id="nav"></nav>
+
+<section>
+<h2>Build it from first principles</h2>
+<div class="split"><div>
+<h3>count++ is three instructions</h3>
+<p>On the ESP32-S3 (Xtensa), <code>count++</code> on a global compiles to a load, an add and a store:</p>
+<div class="eq">l32i  a8, a9, 0     ; read count into a register
+addi  a8, a8, 1     ; add 1
+s32i  a8, a9, 0     ; write it back</div>
+<p>An interrupt, and so a task switch, can happen between any two of them. If another task changes <code>count</code> in that gap, its change is overwritten: a <b>race condition</b>.</p>
+<h3>Critical section</h3>
+<p>The fix is to make the three steps indivisible for other tasks: a <b>critical section</b>. A <b>mutex</b> (mutual exclusion lock) does that between tasks: take it before, give it after; a task that finds it taken blocks until it is free.</p>
+<pre>SemaphoreHandle_t lock = xSemaphoreCreateMutex();
+
+xSemaphoreTake(lock, portMAX_DELAY);
+count++;               // keep this as short as possible
+xSemaphoreGive(lock);</pre>
+</div><div>
+<div id="tl-race"></div>
+</div></div>
+</section>
+
+<section>
+<h2>Break it: priority inversion</h2>
+<div class="split"><div>
+<p>A lock brings a new problem. Low takes the lock; High needs it and blocks. Then Medium, which never touches the lock, wakes and preempts Low. High now waits for Medium, a task less urgent than itself, for as long as Medium runs.</p>
+<p>A FreeRTOS <b>mutex</b> fixes this with <b>priority inheritance</b>: while High waits, Low temporarily runs at High's priority, so Medium cannot preempt it. A <b>binary semaphore</b> has no owner, so it cannot do this: never use one as a lock.</p>
+<div class="legend" aria-label="Timeline colours"><span><i style="background:#343a40"></i>running</span><span><i style="background:#e4e1da"></i>ready or blocked, not running</span><span><i style="background:#e8590c"></i>problem: blocked too long, lost, late</span><span><i style="background:#2f9e44"></i>done / on time</span></div>
+</div><div><div id="tl-inversion"></div></div></div>
+</section>
+
+<section>
+<h2>Why these values</h2>
+<div class="split"><div>
+<div class="why"><b>Why do the tuned gains need no lock?</b> <code>params</code> has one writer (the app, when you press INC/DEC) and one reader (motion). Each value is an aligned 32-bit <code>float</code>, and an aligned 32-bit store is a single instruction on the ESP32-S3: a reader sees either the old or the new value, never half of each. This holds only for independent values; a group that must change together would need a lock.</div>
+</div><div>
+<div class="why"><b>Why does the OLED need no lock?</b> Only the app task ever calls the OLED and button code. One owner means no sharing, so nothing to protect.</div>
+<div class="why"><b>And the I2C bus, shared by sensor and app?</b> The ESP-IDF I2C master driver serializes transactions on a bus with its own internal lock, so the ToF, IMU and OLED transfers never interleave.</div>
+</div></div>
+</section>
+
+<section>
+<div class="key"><b>To remember.</b> Best: don't share. Give each resource one owner task and send it messages. Otherwise use a mutex (not a binary semaphore), and hold it as briefly as possible.</div>
+<div class="anchor"><b>In micro_farr.</b> <code>main/app/ui.c</code>: OLED and buttons, app task only. <code>main/params.c:35</code>: the gains table, single writer, 32-bit values. <code>main/drivers/i2c_bus.c</code>: one bus shared through the ESP-IDF driver's lock.</div>
+<details><summary>Deep dive: Mars Pathfinder, deadlock, ISRs</summary>
+<p>In 1997 the Mars Pathfinder lander kept rebooting on Mars. A high-priority bus task waited on a mutex held by a low-priority task while medium-priority tasks ran: priority inversion. A watchdog saw the bus task miss its deadline and reset the system. The fix, uploaded from Earth, was to turn on priority inheritance for that mutex.</p>
+<p><b>Deadlock:</b> task A holds lock 1 and waits for lock 2 while task B holds lock 2 and waits for lock 1. Neither ever runs again. Rule: take locks in the same order everywhere.</p>
+<p>Never take a mutex inside an interrupt: an ISR cannot block.</p>
+</details>
+</section>
+<div class="pn" id="pn"></div>
+</main>
+<script src="assets/course.js"></script>
+<script>nav('shared');
+mount('tl-race', {
+  label: 'Race condition, step by step', sim: SIM.race, init: { lock: 'none' },
+  toggles: [{ key: 'lock', label: 'Protection', options: [['none', 'None'], ['mutex', 'Mutex']] }],
+  predict: { q: 'Two tasks each run <code>count++</code> once, starting from 0, with no lock. What can <code>count</code> end at?',
+    choices: [['2', '2 only'], ['1', '1 is possible']], whenText: '“None”', label: v => (v === '2' ? '2 only' : '1 is possible'),
+    when: s => s.lock === 'none',
+    why: 'B wrote between A’s read and A’s write, so A wrote back a stale value.' } });
+mount('tl-inversion', {
+  label: 'Priority inversion timeline', sim: s => SIM.inversion({ inherit: s.inherit === 'yes' }), init: { inherit: 'no' },
+  toggles: [{ key: 'inherit', label: 'Lock type', options: [['no', 'binary semaphore'], ['yes', 'mutex (inheritance)']] }],
+  predict: { q: 'Low holds the lock for 5 ms of work. High needs it at 2 ms; Medium (no lock) wakes at 4 ms and runs 12 ms. With a binary semaphore, how long is High blocked?',
+    choices: [['3', '3 ms'], ['5', '5 ms'], ['15', '15 ms']], whenText: '“binary semaphore”', label: v => v + ' ms',
+    when: s => s.inherit === 'no',
+    why: 'Medium preempts Low, so High waits for Medium too. With a mutex, Low inherits priority 3 and High waits only 3 ms.' } });</script>
+</body></html>

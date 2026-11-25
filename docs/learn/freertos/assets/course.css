@@ -1,0 +1,74 @@
+html{color-scheme:light;background:#fff}
+:root{--bg:#ffffff;--fg:#111111;--mut:#4a5058;--line:#e4e1da;--card:#ffffff;--acc:#e8590c;--tint:#fff4ec}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{margin:0 auto}
+h1{font-size:30px;line-height:1.2;margin:0 0 6px}.sub{color:var(--mut);margin:0 0 26px}
+nav{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:34px}nav a{font-size:13px;color:var(--fg);text-decoration:none;border:1px solid var(--line);padding:4px 10px;border-radius:20px}
+section{border-top:1px solid var(--line);padding-top:26px;margin-top:38px}
+h2{font-size:22px;margin:0 0 4px}.sl{font-size:12px;color:var(--mut);font-weight:500;margin-left:6px}
+h3{font-size:17px;margin:26px 0 6px}h4{margin:0 0 6px;font-size:14px}
+p{margin:8px 0}.small{font-size:13px;color:var(--mut);margin:6px 0 0}
+figure{margin:16px 0;text-align:center}svg{width:100%;height:auto;color:var(--fg);font-family:system-ui,sans-serif}
+figcaption{font-size:13px;color:var(--mut);margin-top:6px;text-align:left}
+.key{background:var(--tint);border-left:3px solid var(--acc);padding:10px 14px;border-radius:4px;margin:14px 0;font-size:15px}.key b{color:var(--acc)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin:16px 0}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:16px 0}
+.pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+table{border-collapse:collapse;margin:10px 0;font-size:14px}td,th{border:1px solid var(--line);padding:4px 10px;text-align:center}
+.props td{text-align:left}.props td:first-child{font-weight:600}
+.mono,code{font-family:ui-monospace,Menlo,monospace;font-size:.92em}
+.ok{color:#2f9e44;font-weight:700}.ko{color:var(--acc);font-weight:700}.hl{color:var(--acc);font-weight:700}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:600px){.cols{grid-template-columns:1fr}}
+pre{border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:13px;margin:6px 0;overflow-x:auto}
+
+:root{--good:#2f9e44;--blue:#1c7ed6}
+main{max-width:1500px;padding:28px clamp(16px,3vw,48px) 60px}
+.lead{font-size:17px;max-width:900px}
+section{min-width:0}
+.split{display:grid;grid-template-columns:1fr;gap:10px 48px;align-items:start}
+@media(min-width:1150px){.split{grid-template-columns:minmax(0,5fr) minmax(0,6fr)}.split.even{grid-template-columns:1fr 1fr}}
+.split>div{min-width:0}
+h3{font-size:17px;margin:22px 0 6px}
+.pn{display:flex;justify-content:space-between;gap:10px;margin-top:44px;border-top:1px solid var(--line);padding-top:16px}
+.pn a{color:var(--fg);text-decoration:none;border:1px solid var(--line);border-radius:8px;padding:8px 14px;font-size:14px}.pn a:hover,nav a:hover{border-color:var(--acc)}
+nav a.on{background:var(--fg);color:#fff;border-color:var(--fg)}nav a.soon{color:#9aa0a6;border-style:dashed}
+.widget{border:1px solid var(--line);border-radius:10px;padding:14px;margin:12px 0}
+.ctl{display:flex;flex-wrap:wrap;gap:8px 22px;font-size:14px;align-items:center;margin-bottom:6px}
+.ctl label{display:flex;align-items:center;gap:8px}.ctl output{font-family:ui-monospace,Menlo,monospace;min-width:4.5em}
+input[type=range]{accent-color:var(--acc);width:150px}
+button,select{font:inherit;font-size:14px;border:1px solid var(--line);background:#fff;border-radius:8px;padding:5px 12px;cursor:pointer}button:hover{border-color:var(--acc)}
+button.pick{display:block;width:100%;text-align:left;margin:6px 0}
+button.pick.right{border-color:var(--good);background:#ebfbee}button.pick.wrong{border-color:var(--acc);background:var(--tint)}
+.predict{border:1px dashed var(--acc);border-radius:10px;padding:10px 14px;margin:12px 0}.predict b.q{display:block;margin-bottom:4px}
+.verdict{font-size:14px;margin-top:6px}
+.read{font-family:ui-monospace,Menlo,monospace;font-size:13.5px;background:#faf9f7;border-radius:6px;padding:9px 12px;white-space:pre-wrap;text-align:left;margin:8px 0;line-height:1.55}
+.eq{font-family:ui-monospace,Menlo,monospace;font-size:15px;background:#faf9f7;border-radius:6px;padding:10px 14px;margin:8px 0;white-space:pre-wrap;line-height:1.7}
+.scroll{overflow-x:auto}td.l,th.l{text-align:left}
+details{border:1px solid var(--line);border-radius:10px;padding:8px 14px;margin:14px 0}summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:6px}
+.why{border-left:3px solid var(--blue);background:#f1f7fe;padding:8px 14px;border-radius:4px;margin:12px 0}.why b{color:var(--blue)}
+.anchor{font-size:14px;border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:10px 0}.anchor code{font-size:13px}
+
+/* FreeRTOS course additions */
+.sl{font-family:ui-monospace,Menlo,monospace}
+td,th{text-align:left;vertical-align:top}th{background:#faf9f7}
+ul.pts{margin:8px 0;padding-left:20px}ul.pts li{margin:3px 0}
+.ct{font-size:12px;color:var(--mut);margin-top:10px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--mut);margin:4px 0 10px}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:2px;vertical-align:-2px;margin-right:4px}
+.tl{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:12px 0;display:flex;flex-direction:column;gap:10px}
+.tl .predict{margin:0}
+.tl .choices{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 4px}
+.tl .verdict.good{color:#2f9e44;font-weight:600}.tl .verdict.bad{color:var(--acc);font-weight:600}
+.tl .ctl{margin:0}.tl .lbl{font-size:13px;color:var(--mut)}
+.tl .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.tl .seg button{border:0;border-radius:0}.tl .seg button+button{border-left:1px solid var(--line)}
+.tl button{font-size:13px;padding:4px 10px}
+.tl button:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+.tl button.sel{background:var(--tint);border-color:var(--acc);font-weight:600}
+.tl .seg button.sel{box-shadow:inset 0 0 0 1px var(--acc)}
+.tl .svgwrap{overflow-x:auto}.tl svg{display:block;font-family:ui-monospace,Menlo,monospace}
+.tl .cap{font-family:ui-monospace,Menlo,monospace;font-size:13px;background:#faf9f7;border:1px solid var(--line);border-radius:6px;padding:6px 10px;min-height:2.4em}
+.tl .res{font-size:14px;min-height:1.4em}
+a.card{text-decoration:none;color:inherit}a.card:hover{border-color:var(--acc)}

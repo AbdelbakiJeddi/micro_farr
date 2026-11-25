@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>9. Dual core on the ESP32-S3 · FreeRTOS, the Hard Way</title><link rel="stylesheet" href="assets/course.css"></head><body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#111"/></marker>
+<marker id="aho" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#e8590c"/></marker>
+<marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f9e44"/></marker>
+</defs></svg>
+<main>
+<p class="sub" style="margin:0 0 4px">FreeRTOS, the Hard Way · 9 / 11</p>
+<h1>9. Dual core on the ESP32-S3 <span class="sl">main/app_config.h:40</span></h1>
+<p class="lead">Two cores run FreeRTOS at the same time. Tasks can now run truly in parallel.</p>
+<nav id="nav"></nav>
+
+<section>
+<h2>Build it from first principles</h2>
+<div class="split"><div>
+<h3>Two schedulers, one memory</h3>
+<p>The ESP32-S3 has two cores sharing the same RAM. ESP-IDF FreeRTOS runs the scheduler on both (<b>SMP</b>, symmetric multiprocessing): each core picks the highest-priority ready task it is allowed to run.</p>
+<h3>Affinity</h3>
+<p>A task created with a core number is <b>pinned</b>: only that core runs it. With <code>tskNO_AFFINITY</code> either core may. Pinning gives predictable timing: you know exactly which tasks compete on a core.</p>
+<h3>Why interrupts-off is no longer enough</h3>
+<p>On one core, turning interrupts off stops every other task. On two cores, the other core keeps running. A critical section therefore also needs a <b>spinlock</b>: a flag set with an atomic compare-and-set instruction, which the other core spins on until it is released.</p>
+<pre>static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+
+portENTER_CRITICAL(&amp;mux);  // interrupts off here, other core spins
+shared_counter++;          // a few instructions only
+portEXIT_CRITICAL(&amp;mux);</pre>
+</div><div><figure>
+<svg viewBox="0 0 680 250" role="img" aria-label="micro_farr tasks on the two cores">
+  <g font-size="12.5">
+    <rect x="20" y="10" width="300" height="180" rx="10" fill="#fff" stroke="#111" stroke-width="1.5"/>
+    <text x="170" y="32" text-anchor="middle" font-weight="700">Core 0: slow work</text>
+    <rect x="45" y="48" width="250" height="34" rx="6" fill="#f4f2ee" stroke="#111"/><text x="170" y="70" text-anchor="middle">app · prio 3 · FSM, OLED, buttons, NVS</text>
+    <rect x="45" y="92" width="250" height="34" rx="6" fill="#fff" stroke="#4a5058" stroke-dasharray="4 3"/><text x="170" y="114" text-anchor="middle" fill="#4a5058">main · runs app_main(), then ends</text>
+    <rect x="45" y="136" width="250" height="34" rx="6" fill="#fff" stroke="#4a5058"/><text x="170" y="158" text-anchor="middle" fill="#4a5058">IDLE0 · prio 0</text>
+
+    <rect x="360" y="10" width="300" height="180" rx="10" fill="#fff" stroke="#2f9e44" stroke-width="2"/>
+    <text x="510" y="32" text-anchor="middle" font-weight="700" fill="#2f9e44">Core 1: control loop</text>
+    <rect x="385" y="48" width="250" height="34" rx="6" fill="#f4f2ee" stroke="#111"/><text x="510" y="70" text-anchor="middle">motion · prio 10 · per sample</text>
+    <rect x="385" y="92" width="250" height="34" rx="6" fill="#f4f2ee" stroke="#111"/><text x="510" y="114" text-anchor="middle">sensor · prio 9 · 100 Hz</text>
+    <rect x="385" y="136" width="250" height="34" rx="6" fill="#fff" stroke="#4a5058"/><text x="510" y="158" text-anchor="middle" fill="#4a5058">IDLE1 · prio 0</text>
+
+    <rect x="20" y="206" width="640" height="34" rx="6" fill="#fff4ec" stroke="#e8590c"/>
+    <text x="340" y="228" text-anchor="middle">shared by both cores: RAM · I2C bus · flash and its cache</text>
+  </g>
+</svg>
+<figcaption>Everything time-critical is pinned to core 1, so nothing slow can ever run in front of it. The orange band is where the two cores can still disturb each other.</figcaption>
+</figure></div></div>
+</section>
+
+<section>
+<h2>Why these values</h2>
+<div class="split"><div>
+<div class="why"><b>Why sensor and motion on core 1?</b> They form the control loop: sample, then control step, every 10 ms. On their own core, nothing slow (OLED, planning, flash) can ever be ready in front of them, so their timing depends only on each other.</div>
+<div class="why"><b>Why the app on core 0?</b> <code>app_main()</code> already runs there (<code>CONFIG_ESP_MAIN_TASK_AFFINITY_CPU0</code>), and Wi-Fi/Bluetooth would too if used. Slow, human-speed work belongs together.</div>
+</div><div>
+<div class="why"><b>Why save the maze only at the goal?</b> Writing flash disables the flash cache, which pauses code running from flash on <b>both</b> cores for the length of the write. At the goal the robot is stopped, so a pause of the control loop costs nothing.</div>
+<div class="why"><b>Why keep spinlock sections tiny?</b> While one core holds the lock, the other core may be spinning, doing no work at all, with its interrupts off.</div>
+</div></div>
+</section>
+
+<section>
+<div class="key"><b>To remember.</b> Pin time-critical work to one core and keep slow work on the other. On two cores, a critical section needs a spinlock (<code>portMUX_TYPE</code>), and parallel access is real, not just interleaved.</div>
+<div class="anchor"><b>In micro_farr.</b> <code>main/app_config.h:40-46</code>: sensor and motion on core 1, app on core 0. <code>main/app/state_explore.c:282</code>: <code>maze_store_save()</code> only after the goal is reached.</div>
+<details><summary>Deep dive: what pinning does not protect</summary>
+<p>Pinning separates CPU time, not data. The motion task (core 1) and the app (core 0) can peek the snapshot mailbox at the same instant. That is safe only because a FreeRTOS queue protects itself with its own spinlock.</p>
+</details>
+</section>
+<div class="pn" id="pn"></div>
+</main>
+<script src="assets/course.js"></script>
+<script>nav('dual');</script>
+</body></html>
